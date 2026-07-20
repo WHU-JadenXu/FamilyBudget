@@ -108,6 +108,7 @@ let activeType = "expense";
 let records = loadRecords();
 let currentUser = null;
 let isCloudReady = false;
+let editingRecordId = "";
 
 const form = document.querySelector("#entryForm");
 const amountInput = document.querySelector("#amount");
@@ -120,6 +121,7 @@ const minorSelect = document.querySelector("#minorCategory");
 const noteInput = document.querySelector("#note");
 const recordsList = document.querySelector("#recordsList");
 const filterPerson = document.querySelector("#filterPerson");
+const searchInput = document.querySelector("#searchInput");
 const cloudStatus = document.querySelector("#cloudStatus");
 const cloudHint = document.querySelector("#cloudHint");
 const loginForm = document.querySelector("#loginForm");
@@ -128,6 +130,8 @@ const passwordInput = document.querySelector("#passwordInput");
 const loginBtn = document.querySelector("#loginBtn");
 const syncBtn = document.querySelector("#syncBtn");
 const logoutBtn = document.querySelector("#logoutBtn");
+const submitEntryBtn = document.querySelector("#submitEntryBtn");
+const cancelEditBtn = document.querySelector("#cancelEditBtn");
 
 document.querySelectorAll(".segment").forEach((button) => {
   button.addEventListener("click", () => {
@@ -141,8 +145,11 @@ document.querySelectorAll(".segment").forEach((button) => {
 
 majorSelect.addEventListener("change", fillMinorCategories);
 filterPerson.addEventListener("change", render);
+searchInput.addEventListener("input", render);
+recordsList.addEventListener("click", handleRecordAction);
 syncBtn.addEventListener("click", syncCloudRecords);
 logoutBtn.addEventListener("click", signOut);
+cancelEditBtn.addEventListener("click", cancelEdit);
 
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -158,6 +165,36 @@ form.addEventListener("submit", async (event) => {
 
   if (!Number.isFinite(amount) || amount <= 0) {
     amountInput.focus();
+    return;
+  }
+
+  if (editingRecordId) {
+    const existingRecord = records.find((item) => item.id === editingRecordId);
+    if (!existingRecord) {
+      cancelEdit();
+      return;
+    }
+
+    const updatedRecord = {
+      ...existingRecord,
+      type: activeType,
+      person: personSelect.value,
+      amount: Math.round(amount * 100) / 100,
+      benefit: activeType === "expense" ? benefitSelect.value : "",
+      major: majorSelect.value,
+      minor: minorSelect.value,
+      note: noteInput.value.trim(),
+      date: entryDateInput.value
+    };
+
+    records = records.map((item) => (item.id === editingRecordId ? updatedRecord : item));
+    saveRecords();
+    cancelEdit();
+    render();
+
+    if (isCloudReady) {
+      await saveCloudRecord(updatedRecord);
+    }
     return;
   }
 
@@ -242,6 +279,15 @@ function resetForm() {
   fillMajorCategories();
 }
 
+function setActiveType(type) {
+  activeType = type;
+  document.querySelectorAll(".segment").forEach((button) => {
+    button.classList.toggle("active", button.dataset.type === type);
+  });
+  syncBenefitField();
+  fillMajorCategories();
+}
+
 function fillMajorCategories() {
   majorSelect.innerHTML = Object.keys(categoryMap[activeType])
     .map((name) => `<option value="${name}">${displayCategory(name)}</option>`)
@@ -260,7 +306,13 @@ function render() {
   const today = getShanghaiDay();
   const monthKey = today.slice(0, 7);
   const monthRecords = records.filter((record) => getRecordDay(record).slice(0, 7) === monthKey);
-  const visibleRecords = records.filter((record) => filterPerson.value === "all" || record.person === filterPerson.value);
+  const query = searchInput.value.trim().toLowerCase();
+  const visibleRecords = records.filter((record) => {
+    const personMatched = filterPerson.value === "all" || record.person === filterPerson.value;
+    if (!personMatched) return false;
+    if (!query) return true;
+    return getRecordSearchText(record).includes(query);
+  });
 
   document.querySelector("#monthLabel").textContent = `今天 ${formatDay(today)}`;
   document.querySelector("#monthExpense").textContent = money(sum(monthRecords, "expense"));
@@ -270,13 +322,16 @@ function render() {
 
   recordsList.innerHTML = "";
   if (!visibleRecords.length) {
-    recordsList.innerHTML = '<div class="empty-state">还没有记录，先记一笔。</div>';
+    recordsList.innerHTML = `<div class="empty-state">${records.length ? "没有找到匹配记录。" : "还没有记录，先记一笔。"}</div>`;
     return;
   }
 
   const template = document.querySelector("#recordTemplate");
   visibleRecords.slice(0, 80).forEach((record) => {
     const node = template.content.cloneNode(true);
+    const itemNode = node.querySelector(".record-item");
+    itemNode.dataset.recordId = record.id;
+    itemNode.classList.toggle("editing", record.id === editingRecordId);
     node.querySelector(".record-icon").textContent = displayCategory(record.major).slice(0, 2).trim();
     node.querySelector(".record-title").textContent = `${displayCategory(record.major)} / ${displayMinor(record.minor)}`;
     node.querySelector(".record-meta").textContent = [
@@ -292,6 +347,86 @@ function render() {
     moneyNode.classList.toggle("income", record.type === "income");
     recordsList.appendChild(node);
   });
+}
+
+function getRecordSearchText(record) {
+  return [
+    record.type === "income" ? "收入" : "支出",
+    record.person,
+    record.amount,
+    record.benefit,
+    record.major,
+    record.minor,
+    record.note,
+    getRecordDay(record),
+    formatDay(getRecordDay(record))
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+async function handleRecordAction(event) {
+  const actionButton = event.target.closest("button");
+  const itemNode = event.target.closest(".record-item");
+  if (!actionButton || !itemNode) return;
+
+  const recordId = itemNode.dataset.recordId;
+  if (actionButton.classList.contains("record-edit")) {
+    startEdit(recordId);
+    return;
+  }
+
+  if (actionButton.classList.contains("record-delete")) {
+    await deleteRecord(recordId);
+  }
+}
+
+function startEdit(recordId) {
+  const record = records.find((item) => item.id === recordId);
+  if (!record) return;
+
+  editingRecordId = recordId;
+  setActiveType(record.type);
+  personSelect.value = record.person;
+  amountInput.value = record.amount;
+  entryDateInput.value = getRecordDay(record);
+  benefitSelect.value = record.benefit || "自己用";
+  majorSelect.value = record.major;
+  fillMinorCategories();
+  minorSelect.value = record.minor;
+  noteInput.value = record.note || "";
+  submitEntryBtn.textContent = "保存修改";
+  cancelEditBtn.hidden = false;
+  form.scrollIntoView({ behavior: "smooth", block: "start" });
+  render();
+}
+
+function cancelEdit() {
+  editingRecordId = "";
+  resetForm();
+  submitEntryBtn.textContent = "记一笔";
+  cancelEditBtn.hidden = true;
+}
+
+async function deleteRecord(recordId) {
+  const record = records.find((item) => item.id === recordId);
+  if (!record) return;
+  if (!confirm(`确定删除这条记录吗？\n${displayCategory(record.major)} / ${displayMinor(record.minor)} ${money(record.amount)}`)) return;
+
+  records = records.filter((item) => item.id !== recordId);
+  if (editingRecordId === recordId) cancelEdit();
+  saveRecords();
+  render();
+
+  if (isCloudReady) {
+    const { error } = await supabaseClient.from("records").delete().eq("family_id", familyId).eq("id", recordId);
+    if (error) {
+      setCloudState("删除云端记录失败", "本机已删除，稍后点“同步”会重新拉取云端记录。");
+      return;
+    }
+    setCloudState("云同步已开启", `${currentUser.email} · ${records.length} 条记录`);
+  }
 }
 
 async function initCloud() {

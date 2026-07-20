@@ -109,7 +109,10 @@
             <input id="note" name="note" autocomplete="off" placeholder="可不填" />
           </label>
 
-          <button class="primary-action full" type="submit">记一笔</button>
+          <div class="form-actions full">
+            <button id="submitEntryBtn" class="primary-action" type="submit">记一笔</button>
+            <button id="cancelEditBtn" class="secondary-action" type="button" hidden>取消编辑</button>
+          </div>
         </form>
       </section>
 
@@ -131,6 +134,7 @@
             <option value="徐佳丹">👧 徐佳丹</option>
           </select>
         </div>
+        <input id="searchInput" class="record-search" type="search" autocomplete="off" placeholder="搜索分类、备注、日期、金额" />
         <div id="recordsList" class="records-list"></div>
       </section>
     </main>
@@ -143,6 +147,10 @@
           <span class="record-meta"></span>
         </div>
         <div class="record-money"></div>
+        <div class="record-actions">
+          <button class="record-edit" type="button">编辑</button>
+          <button class="record-delete" type="button">删除</button>
+        </div>
       </article>
     </template>
 

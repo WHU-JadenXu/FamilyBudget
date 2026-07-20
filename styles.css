@@ -269,12 +269,28 @@ select:focus {
   grid-column: 1 / -1;
 }
 
+.form-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+}
+
 .primary-action {
   min-height: 50px;
   border: 0;
   border-radius: 8px;
   background: var(--amber);
   color: #201a10;
+  font-weight: 800;
+}
+
+.secondary-action {
+  min-height: 50px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--muted);
+  padding: 0 14px;
   font-weight: 800;
 }
 
@@ -317,6 +333,10 @@ select:focus {
   min-height: 36px;
 }
 
+.record-search {
+  margin-bottom: 10px;
+}
+
 .records-list {
   display: grid;
   gap: 10px;
@@ -332,6 +352,11 @@ select:focus {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.92);
+}
+
+.record-item.editing {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 3px rgba(242, 191, 89, 0.24);
 }
 
 .record-icon {
@@ -376,6 +401,29 @@ select:focus {
   color: var(--blue);
 }
 
+.record-actions {
+  display: grid;
+  grid-column: 2 / -1;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  width: min(180px, 100%);
+  justify-self: end;
+}
+
+.record-actions button {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--green-dark);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.record-actions .record-delete {
+  color: var(--danger);
+}
+
 .empty-state {
   padding: 26px 16px;
   border: 1px dashed var(--line);
@@ -402,8 +450,23 @@ select:focus {
     grid-template-columns: 1fr;
   }
 
+  .form-actions,
   .login-form,
   .cloud-actions {
     grid-template-columns: 1fr;
+  }
+
+  .record-item {
+    grid-template-columns: 38px minmax(0, 1fr);
+  }
+
+  .record-money {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .record-actions {
+    grid-column: 1 / -1;
+    width: 100%;
   }
 }

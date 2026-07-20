@@ -585,7 +585,7 @@ function toCloudRecord(record) {
     note: record.note || "",
     spent_on: getRecordDay(record),
     created_at: record.createdAt || new Date().toISOString(),
-    created_by: record.createdBy || currentUser.id
+    created_by: currentUser.id
   };
 }
 

@@ -1,0 +1,15 @@
+{
+  "name": "家庭记账",
+  "short_name": "家庭记账",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#eef6f2",
+  "theme_color": "#eef6f2",
+  "icons": [
+    {
+      "src": "./assets/miniapp-avatar-xl.png",
+      "sizes": "1024x1024",
+      "type": "image/png"
+    }
+  ]
+}

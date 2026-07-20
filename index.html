@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#eef6f2" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="家庭记账" />
+    <title>家庭记账</title>
+    <link rel="apple-touch-icon" href="./assets/miniapp-avatar-xl.png" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="top-band">
+        <div>
+          <p class="eyebrow">👦 李逍宇 & 👧 徐佳丹</p>
+          <h1>家庭记账</h1>
+        </div>
+        <div class="month-chip" id="monthLabel"></div>
+      </section>
+
+      <section class="summary-band" aria-label="本月概览">
+        <div class="summary-main">
+          <span>本月支出</span>
+          <strong id="monthExpense">¥0.00</strong>
+        </div>
+        <div class="summary-grid">
+          <div>
+            <span>👦 李逍宇</span>
+            <strong id="liTotal">¥0.00</strong>
+          </div>
+          <div>
+            <span>👧 徐佳丹</span>
+            <strong id="xuTotal">¥0.00</strong>
+          </div>
+          <div>
+            <span>本月收入</span>
+            <strong id="monthIncome">¥0.00</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="cloud-panel" aria-label="云同步">
+        <div>
+          <strong id="cloudStatus">本地模式</strong>
+          <span id="cloudHint">填好 Supabase 配置并登录后，会自动同步到云端。</span>
+        </div>
+        <form id="loginForm" class="login-form">
+          <input id="emailInput" type="email" autocomplete="email" placeholder="邮箱登录同步" />
+          <button id="loginBtn" type="submit">发送登录链接</button>
+        </form>
+        <div class="cloud-actions">
+          <button id="syncBtn" type="button">同步</button>
+          <button id="logoutBtn" type="button" hidden>退出</button>
+        </div>
+      </section>
+
+      <section class="entry-panel" aria-label="新增记账">
+        <div class="segmented" role="group" aria-label="记账类型">
+          <button class="segment active" data-type="expense" type="button">支出</button>
+          <button class="segment" data-type="income" type="button">收入</button>
+        </div>
+
+        <form id="entryForm" class="entry-form">
+          <label>
+            <span>记账人</span>
+            <select id="person" name="person">
+              <option value="李逍宇">👦 李逍宇</option>
+              <option value="徐佳丹">👧 徐佳丹</option>
+            </select>
+          </label>
+
+          <label>
+            <span>金额</span>
+            <input id="amount" name="amount" inputmode="decimal" autocomplete="off" placeholder="0.00" required />
+          </label>
+
+          <label class="full">
+            <span>日期</span>
+            <input id="entryDate" name="entryDate" type="date" required />
+          </label>
+
+          <label id="benefitField" class="full">
+            <span>花给谁</span>
+            <select id="benefit" name="benefit">
+              <option value="自己用">🙋 自己用</option>
+              <option value="李逍宇用">👦 李逍宇用</option>
+              <option value="徐佳丹用">👧 徐佳丹用</option>
+              <option value="两个人共用">👫 两个人共用</option>
+            </select>
+          </label>
+
+          <label>
+            <span>大类</span>
+            <select id="majorCategory" name="majorCategory"></select>
+          </label>
+
+          <label>
+            <span>小类</span>
+            <select id="minorCategory" name="minorCategory"></select>
+          </label>
+
+          <label class="full">
+            <span>备注</span>
+            <input id="note" name="note" autocomplete="off" placeholder="可不填" />
+          </label>
+
+          <button class="primary-action full" type="submit">记一笔</button>
+        </form>
+      </section>
+
+      <section class="toolbar" aria-label="数据工具">
+        <button id="exportBtn" type="button">导出</button>
+        <label class="import-button">
+          导入
+          <input id="importFile" type="file" accept="application/json" />
+        </label>
+        <button id="clearBtn" type="button">清空</button>
+      </section>
+
+      <section class="records-section">
+        <div class="section-heading">
+          <h2>最近记录</h2>
+          <select id="filterPerson" aria-label="筛选记账人">
+            <option value="all">全部</option>
+            <option value="李逍宇">👦 李逍宇</option>
+            <option value="徐佳丹">👧 徐佳丹</option>
+          </select>
+        </div>
+        <div id="recordsList" class="records-list"></div>
+      </section>
+    </main>
+
+    <template id="recordTemplate">
+      <article class="record-item">
+        <div class="record-icon"></div>
+        <div class="record-copy">
+          <strong class="record-title"></strong>
+          <span class="record-meta"></span>
+        </div>
+        <div class="record-money"></div>
+      </article>
+    </template>
+
+    <script src="./config.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>

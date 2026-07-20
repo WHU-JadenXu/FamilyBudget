@@ -124,6 +124,7 @@ const cloudStatus = document.querySelector("#cloudStatus");
 const cloudHint = document.querySelector("#cloudHint");
 const loginForm = document.querySelector("#loginForm");
 const emailInput = document.querySelector("#emailInput");
+const passwordInput = document.querySelector("#passwordInput");
 const loginBtn = document.querySelector("#loginBtn");
 const syncBtn = document.querySelector("#syncBtn");
 const logoutBtn = document.querySelector("#logoutBtn");
@@ -146,8 +147,9 @@ logoutBtn.addEventListener("click", signOut);
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const email = emailInput.value.trim();
-  if (!email) return;
-  await signIn(email);
+  const password = passwordInput.value;
+  if (!email || !password) return;
+  await signIn(email, password);
 });
 
 form.addEventListener("submit", async (event) => {
@@ -324,7 +326,7 @@ function updateAuthUi() {
   if (isCloudReady) {
     setCloudState("云同步已开启", `${currentUser.email} · ${records.length} 条记录`);
   } else if (supabaseClient) {
-    setCloudState("待登录", "输入邮箱，点开邮件里的登录链接后即可同步。");
+    setCloudState("待登录", "输入 Supabase 用户邮箱和密码后即可同步。");
   } else {
     setCloudState("本地模式", "填好 Supabase 配置并登录后，会自动同步到云端。");
   }
@@ -335,33 +337,40 @@ function setCloudState(title, hint) {
   cloudHint.textContent = hint;
 }
 
-async function signIn(email) {
+async function signIn(email, password) {
   if (!supabaseClient) {
     setCloudState("还没配置 Supabase", "先在 config.js 里填入 SUPABASE_URL 和 SUPABASE_ANON_KEY。");
     return;
   }
 
-  const redirectTo = getLoginRedirectUrl();
-  if (!redirectTo) {
-    setCloudState("需要网页地址", "先发布到 GitHub Pages，或用本地 http 地址打开页面后再登录。");
-    return;
-  }
-
+  setCloudState("正在登录", "正在连接云端账本。");
   loginBtn.disabled = true;
-  const { error } = await supabaseClient.auth.signInWithOtp({
-    email,
-    options: {
-      emailRedirectTo: redirectTo
-    }
-  });
+  const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
   loginBtn.disabled = false;
 
   if (error) {
-    setCloudState("登录失败", error.message);
+    setCloudState("登录失败", formatAuthError(error));
     return;
   }
 
-  setCloudState("登录邮件已发送", "去邮箱点登录链接，再回到这个页面。");
+  passwordInput.value = "";
+  setCloudState("登录成功", "正在同步云端账本。");
+  await syncCloudRecords();
+}
+
+function formatAuthError(error) {
+  const message = String(error?.message || "");
+  const lowerMessage = message.toLowerCase();
+  if (lowerMessage.includes("invalid login credentials")) {
+    return "邮箱或密码不对。请确认用的是 Supabase 后台创建用户时设置的密码。";
+  }
+  if (lowerMessage.includes("email not confirmed")) {
+    return "这个用户还没有确认邮箱。请在 Supabase 后台把用户设为 confirmed，或重新创建时开启 Auto Confirm。";
+  }
+  if (lowerMessage.includes("rate limit")) {
+    return "登录尝试太频繁了，先等一会儿再试。";
+  }
+  return message || "请稍后再试。";
 }
 
 function getLoginRedirectUrl() {

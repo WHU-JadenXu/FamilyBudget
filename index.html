@@ -49,8 +49,9 @@
           <span id="cloudHint">填好 Supabase 配置并登录后，会自动同步到云端。</span>
         </div>
         <form id="loginForm" class="login-form">
-          <input id="emailInput" type="email" autocomplete="email" placeholder="邮箱登录同步" />
-          <button id="loginBtn" type="submit">发送登录链接</button>
+          <input id="emailInput" type="email" autocomplete="email" placeholder="邮箱" required />
+          <input id="passwordInput" type="password" autocomplete="current-password" placeholder="密码" required />
+          <button id="loginBtn" type="submit">登录同步</button>
         </form>
         <div class="cloud-actions">
           <button id="syncBtn" type="button">同步</button>

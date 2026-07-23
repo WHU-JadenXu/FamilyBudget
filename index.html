@@ -59,95 +59,113 @@
         </div>
       </section>
 
-      <section class="entry-panel" aria-label="新增记账">
-        <div class="segmented" role="group" aria-label="记账类型">
-          <button class="segment active" data-type="expense" type="button">支出</button>
-          <button class="segment" data-type="income" type="button">收入</button>
-        </div>
+      <section id="pageEntry" class="app-page active" data-page="entry">
+        <section class="entry-panel" aria-label="新增记账">
+          <div class="segmented" role="group" aria-label="记账类型">
+            <button class="segment active" data-type="expense" type="button">支出</button>
+            <button class="segment" data-type="income" type="button">收入</button>
+          </div>
 
-        <form id="entryForm" class="entry-form">
-          <label>
-            <span>记账人</span>
-            <select id="person" name="person">
+          <form id="entryForm" class="entry-form">
+            <label>
+              <span>记账人</span>
+              <select id="person" name="person">
+                <option value="李逍宇">👦 李逍宇</option>
+                <option value="徐佳丹">👧 徐佳丹</option>
+              </select>
+            </label>
+
+            <label>
+              <span>金额</span>
+              <input id="amount" name="amount" inputmode="decimal" autocomplete="off" placeholder="0.00" required />
+            </label>
+
+            <label class="full">
+              <span>日期</span>
+              <input id="entryDate" name="entryDate" type="date" required />
+            </label>
+
+            <label id="benefitField" class="full">
+              <span>花给谁</span>
+              <select id="benefit" name="benefit">
+                <option value="李逍宇用">👦 李逍宇用</option>
+                <option value="徐佳丹用">👧 徐佳丹用</option>
+                <option value="两个人共用">👫 两个人共用</option>
+              </select>
+            </label>
+
+            <label>
+              <span>大类</span>
+              <select id="majorCategory" name="majorCategory"></select>
+            </label>
+
+            <label>
+              <span>小类</span>
+              <select id="minorCategory" name="minorCategory"></select>
+            </label>
+
+            <label class="full">
+              <span>备注</span>
+              <input id="note" name="note" autocomplete="off" placeholder="可不填" />
+            </label>
+
+            <div class="form-actions full">
+              <button id="submitEntryBtn" class="primary-action" type="submit">记一笔</button>
+              <button id="cancelEditBtn" class="secondary-action" type="button" hidden>取消编辑</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="records-section">
+          <div class="section-heading">
+            <h2>最新 5 条</h2>
+          </div>
+          <div id="recentRecordsList" class="records-list"></div>
+        </section>
+      </section>
+
+      <section id="pageRecords" class="app-page" data-page="records">
+        <section class="records-section">
+          <div class="section-heading">
+            <h2>全部记录</h2>
+            <select id="filterPerson" aria-label="筛选记账人">
+              <option value="all">全部</option>
               <option value="李逍宇">👦 李逍宇</option>
               <option value="徐佳丹">👧 徐佳丹</option>
             </select>
-          </label>
-
-          <label>
-            <span>金额</span>
-            <input id="amount" name="amount" inputmode="decimal" autocomplete="off" placeholder="0.00" required />
-          </label>
-
-          <label class="full">
-            <span>日期</span>
-            <input id="entryDate" name="entryDate" type="date" required />
-          </label>
-
-          <label id="benefitField" class="full">
-            <span>花给谁</span>
-            <select id="benefit" name="benefit">
-              <option value="自己用">🙋 自己用</option>
-              <option value="李逍宇用">👦 李逍宇用</option>
-              <option value="徐佳丹用">👧 徐佳丹用</option>
-              <option value="两个人共用">👫 两个人共用</option>
-            </select>
-          </label>
-
-          <label>
-            <span>大类</span>
-            <select id="majorCategory" name="majorCategory"></select>
-          </label>
-
-          <label>
-            <span>小类</span>
-            <select id="minorCategory" name="minorCategory"></select>
-          </label>
-
-          <label class="full">
-            <span>备注</span>
-            <input id="note" name="note" autocomplete="off" placeholder="可不填" />
-          </label>
-
-          <div class="form-actions full">
-            <button id="submitEntryBtn" class="primary-action" type="submit">记一笔</button>
-            <button id="cancelEditBtn" class="secondary-action" type="button" hidden>取消编辑</button>
           </div>
-        </form>
+          <input id="searchInput" class="record-search" type="search" autocomplete="off" placeholder="搜索分类、备注、日期、金额" />
+          <div id="allRecordsList" class="records-list"></div>
+        </section>
       </section>
 
-      <section class="toolbar" aria-label="数据工具">
-        <div class="date-range">
-          <label>
-            <span>开始日期</span>
-            <input id="exportStartDate" type="date" />
+      <section id="pageExport" class="app-page" data-page="export">
+        <section class="toolbar" aria-label="数据工具">
+          <div class="date-range">
+            <label>
+              <span>开始日期</span>
+              <input id="exportStartDate" type="date" />
+            </label>
+            <label>
+              <span>结束日期</span>
+              <input id="exportEndDate" type="date" />
+            </label>
+          </div>
+          <button id="exportExcelBtn" type="button">导出 Excel</button>
+          <button id="exportBtn" type="button">导出 JSON</button>
+          <label class="import-button">
+            导入
+            <input id="importFile" type="file" accept="application/json" />
           </label>
-          <label>
-            <span>结束日期</span>
-            <input id="exportEndDate" type="date" />
-          </label>
-        </div>
-        <button id="exportExcelBtn" type="button">导出 Excel</button>
-        <button id="exportBtn" type="button">导出 JSON</button>
-        <label class="import-button">
-          导入
-          <input id="importFile" type="file" accept="application/json" />
-        </label>
-        <button id="clearBtn" type="button">清空全部记录</button>
+          <button id="clearBtn" type="button">清空全部记录</button>
+        </section>
       </section>
 
-      <section class="records-section">
-        <div class="section-heading">
-          <h2>最近记录</h2>
-          <select id="filterPerson" aria-label="筛选记账人">
-            <option value="all">全部</option>
-            <option value="李逍宇">👦 李逍宇</option>
-            <option value="徐佳丹">👧 徐佳丹</option>
-          </select>
-        </div>
-        <input id="searchInput" class="record-search" type="search" autocomplete="off" placeholder="搜索分类、备注、日期、金额" />
-        <div id="recordsList" class="records-list"></div>
-      </section>
+      <nav class="bottom-tabs" aria-label="页面切换">
+        <button class="bottom-tab active" data-target-page="entry" type="button">记录</button>
+        <button class="bottom-tab" data-target-page="records" type="button">明细</button>
+        <button class="bottom-tab" data-target-page="export" type="button">导出</button>
+      </nav>
     </main>
 
     <template id="recordTemplate">

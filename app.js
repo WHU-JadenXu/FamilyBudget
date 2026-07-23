@@ -9,7 +9,7 @@ const categoryMap = {
   expense: {
     餐饮: ["早餐", "午餐", "晚餐", "买菜", "水果零食", "咖啡奶茶"],
     交通: ["地铁公交", "打车", "加油充电", "停车", "高铁机票"],
-    居家: ["房租房贷", "水电燃气", "物业", "家政", "维修"],
+    居家: ["房租房贷", "水电燃气", "网费", "话费", "会员费", "物业", "家政", "维修"],
     购物: ["日用品", "服饰", "数码", "护肤美妆", "礼物"],
     医疗: ["挂号", "药品", "体检", "保险"],
     娱乐: ["电影演出", "旅行", "游戏会员", "聚会", "运动"],
@@ -52,6 +52,9 @@ const minorLabels = {
   高铁机票: "🚄 高铁机票",
   房租房贷: "🏡 房租房贷",
   水电燃气: "💡 水电燃气",
+  网费: "🌐 网费",
+  话费: "📱 话费",
+  会员费: "⭐ 会员费",
   物业: "🔑 物业",
   家政: "🧹 家政",
   维修: "🔧 维修",
@@ -88,7 +91,6 @@ const minorLabels = {
 };
 
 const benefitLabels = {
-  自己用: "🙋 自己用",
   李逍宇用: "👦 李逍宇用",
   徐佳丹用: "👧 徐佳丹用",
   两个人共用: "👫 两个人共用"
@@ -98,6 +100,11 @@ const storageKey = "family-ledger-web-v1";
 const config = window.LEDGER_CONFIG || {};
 const familyId = config.FAMILY_ID || "li-xu-family";
 const configuredSiteUrl = (config.SITE_URL || "").trim();
+const accountPersonHashes = {
+  ee45a0526b47945f5f90fe628309aa0dd33d00838588e961a8e93cacc981a518: "徐佳丹",
+  bc4d99bb615536adf2339e5d10d749dd13e16350993b48a485370d2a6437840a: "李逍宇",
+  ...(config.ACCOUNT_PERSON_HASHES || {})
+};
 const hasSupabaseConfig = Boolean(config.SUPABASE_URL && config.SUPABASE_ANON_KEY);
 const supabaseClient =
   hasSupabaseConfig && window.supabase
@@ -109,6 +116,7 @@ let records = loadRecords();
 let currentUser = null;
 let isCloudReady = false;
 let editingRecordId = "";
+let preferredPerson = localStorage.getItem(`${storageKey}-preferred-person`) || "";
 
 const form = document.querySelector("#entryForm");
 const amountInput = document.querySelector("#amount");
@@ -119,7 +127,8 @@ const benefitSelect = document.querySelector("#benefit");
 const majorSelect = document.querySelector("#majorCategory");
 const minorSelect = document.querySelector("#minorCategory");
 const noteInput = document.querySelector("#note");
-const recordsList = document.querySelector("#recordsList");
+const recentRecordsList = document.querySelector("#recentRecordsList");
+const allRecordsList = document.querySelector("#allRecordsList");
 const filterPerson = document.querySelector("#filterPerson");
 const searchInput = document.querySelector("#searchInput");
 const cloudStatus = document.querySelector("#cloudStatus");
@@ -134,6 +143,8 @@ const submitEntryBtn = document.querySelector("#submitEntryBtn");
 const cancelEditBtn = document.querySelector("#cancelEditBtn");
 const exportStartDateInput = document.querySelector("#exportStartDate");
 const exportEndDateInput = document.querySelector("#exportEndDate");
+const pageNodes = document.querySelectorAll(".app-page");
+const bottomTabs = document.querySelectorAll(".bottom-tab");
 
 document.querySelectorAll(".segment").forEach((button) => {
   button.addEventListener("click", () => {
@@ -146,12 +157,17 @@ document.querySelectorAll(".segment").forEach((button) => {
 });
 
 majorSelect.addEventListener("change", fillMinorCategories);
+personSelect.addEventListener("change", syncBenefitWithPerson);
 filterPerson.addEventListener("change", render);
 searchInput.addEventListener("input", render);
-recordsList.addEventListener("click", handleRecordAction);
+recentRecordsList.addEventListener("click", handleRecordAction);
+allRecordsList.addEventListener("click", handleRecordAction);
 syncBtn.addEventListener("click", syncCloudRecords);
 logoutBtn.addEventListener("click", signOut);
 cancelEditBtn.addEventListener("click", cancelEdit);
+bottomTabs.forEach((button) => {
+  button.addEventListener("click", () => switchPage(button.dataset.targetPage));
+});
 
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -238,7 +254,7 @@ document.querySelector("#importFile").addEventListener("change", async (event) =
   try {
     const imported = JSON.parse(await file.text());
     if (!Array.isArray(imported)) throw new Error("Invalid data");
-    records = imported.filter(isRecord);
+    records = migrateRecords(imported.filter(isRecord));
     saveRecords();
     render();
     if (isCloudReady) {
@@ -357,11 +373,20 @@ async function getRecordsForExport(startDate, endDate) {
 
 function resetForm() {
   form.reset();
-  personSelect.value = people[0];
+  personSelect.value = getDefaultPerson();
   entryDateInput.value = getShanghaiDay();
-  benefitSelect.value = "自己用";
+  benefitSelect.value = getDefaultBenefit();
   syncBenefitField();
   fillMajorCategories();
+}
+
+function switchPage(pageName) {
+  pageNodes.forEach((page) => {
+    page.classList.toggle("active", page.dataset.page === pageName);
+  });
+  bottomTabs.forEach((button) => {
+    button.classList.toggle("active", button.dataset.targetPage === pageName);
+  });
 }
 
 function setActiveType(type) {
@@ -405,14 +430,25 @@ function render() {
   document.querySelector("#liTotal").textContent = money(sum(monthRecords.filter((record) => record.person === "李逍宇"), "expense"));
   document.querySelector("#xuTotal").textContent = money(sum(monthRecords.filter((record) => record.person === "徐佳丹"), "expense"));
 
-  recordsList.innerHTML = "";
-  if (!visibleRecords.length) {
-    recordsList.innerHTML = `<div class="empty-state">${records.length ? "没有找到匹配记录。" : "还没有记录，先记一笔。"}</div>`;
+  renderRecordList(recentRecordsList, records.slice(0, 5), {
+    emptyText: "还没有记录，先记一笔。",
+    limit: 5
+  });
+  renderRecordList(allRecordsList, visibleRecords, {
+    emptyText: records.length ? "没有找到匹配记录。" : "还没有记录，先记一笔。",
+    limit: 80
+  });
+}
+
+function renderRecordList(listNode, items, options = {}) {
+  listNode.innerHTML = "";
+  if (!items.length) {
+    listNode.innerHTML = `<div class="empty-state">${options.emptyText || "没有记录。"}</div>`;
     return;
   }
 
   const template = document.querySelector("#recordTemplate");
-  visibleRecords.slice(0, 80).forEach((record) => {
+  items.slice(0, options.limit || 80).forEach((record) => {
     const node = template.content.cloneNode(true);
     const itemNode = node.querySelector(".record-item");
     itemNode.dataset.recordId = record.id;
@@ -430,7 +466,7 @@ function render() {
     const moneyNode = node.querySelector(".record-money");
     moneyNode.textContent = `${record.type === "income" ? "+" : "-"}${money(record.amount)}`;
     moneyNode.classList.toggle("income", record.type === "income");
-    recordsList.appendChild(node);
+    listNode.appendChild(node);
   });
 }
 
@@ -449,6 +485,40 @@ function getRecordSearchText(record) {
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
+}
+
+async function applyPreferredPersonForCurrentUser() {
+  const matchedPerson = await getMatchedPersonForEmail(currentUser?.email || "");
+  if (matchedPerson) {
+    preferredPerson = matchedPerson;
+    localStorage.setItem(`${storageKey}-preferred-person`, preferredPerson);
+  }
+  if (!editingRecordId) {
+    personSelect.value = getDefaultPerson();
+    benefitSelect.value = getDefaultBenefit();
+  }
+}
+
+async function getMatchedPersonForEmail(email) {
+  if (!email || !window.crypto?.subtle) return "";
+  const hash = await sha256Hex(email.trim().toLowerCase());
+  return people.includes(accountPersonHashes[hash]) ? accountPersonHashes[hash] : "";
+}
+
+async function sha256Hex(value) {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await window.crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function getDefaultPerson() {
+  return people.includes(preferredPerson) ? preferredPerson : people[0];
+}
+
+function getDefaultBenefit() {
+  return `${getDefaultPerson()}用`;
 }
 
 async function handleRecordAction(event) {
@@ -476,13 +546,14 @@ function startEdit(recordId) {
   personSelect.value = record.person;
   amountInput.value = record.amount;
   entryDateInput.value = getRecordDay(record);
-  benefitSelect.value = record.benefit || "自己用";
+  benefitSelect.value = normalizeBenefit(record);
   majorSelect.value = record.major;
   fillMinorCategories();
   minorSelect.value = record.minor;
   noteInput.value = record.note || "";
   submitEntryBtn.textContent = "保存修改";
   cancelEditBtn.hidden = false;
+  switchPage("entry");
   form.scrollIntoView({ behavior: "smooth", block: "start" });
   render();
 }
@@ -524,10 +595,12 @@ async function initCloud() {
   const { data } = await supabaseClient.auth.getUser();
   currentUser = data.user;
   isCloudReady = Boolean(currentUser);
+  await applyPreferredPersonForCurrentUser();
 
-  supabaseClient.auth.onAuthStateChange((_event, session) => {
+  supabaseClient.auth.onAuthStateChange(async (_event, session) => {
     currentUser = session?.user || null;
     isCloudReady = Boolean(currentUser);
+    await applyPreferredPersonForCurrentUser();
     updateAuthUi();
     if (isCloudReady) syncCloudRecords();
   });
@@ -574,6 +647,10 @@ async function signIn(email, password) {
   }
 
   passwordInput.value = "";
+  const { data } = await supabaseClient.auth.getUser();
+  currentUser = data.user;
+  isCloudReady = Boolean(currentUser);
+  await applyPreferredPersonForCurrentUser();
   setCloudState("登录成功", "正在同步云端账本。");
   await syncCloudRecords();
 }
@@ -606,6 +683,7 @@ async function signOut() {
   await supabaseClient.auth.signOut();
   currentUser = null;
   isCloudReady = false;
+  await applyPreferredPersonForCurrentUser();
   updateAuthUi();
 }
 
@@ -629,9 +707,15 @@ async function syncCloudRecords() {
     return;
   }
 
-  records = data.map(fromCloudRecord).filter(isRecord);
+  const shouldRepairCloudBenefits = data.some((row) => row.benefit === "自己用");
+  const syncedRecords = data.map(fromCloudRecord).filter(isRecord);
+  const migratedRecords = migrateRecords(syncedRecords);
+  records = migratedRecords;
   saveRecords();
   render();
+  if (shouldRepairCloudBenefits || hasBenefitMigration(syncedRecords, migratedRecords)) {
+    await uploadMissingLocalRecords();
+  }
   setCloudState("云同步已开启", `${currentUser.email} · ${records.length} 条记录`);
 }
 
@@ -675,7 +759,7 @@ function toCloudRecord(record) {
 }
 
 function fromCloudRecord(row) {
-  return {
+  return normalizeRecordBenefit({
     id: row.id,
     type: row.type,
     person: row.person,
@@ -687,7 +771,7 @@ function fromCloudRecord(row) {
     date: row.spent_on,
     createdAt: row.created_at,
     createdBy: row.created_by || ""
-  };
+  });
 }
 
 function sum(items, type) {
@@ -821,7 +905,13 @@ function displayBenefit(benefit) {
 function loadRecords() {
   try {
     const parsed = JSON.parse(localStorage.getItem(storageKey) || "[]");
-    return Array.isArray(parsed) ? parsed.filter(isRecord) : [];
+    if (!Array.isArray(parsed)) return [];
+    const validRecords = parsed.filter(isRecord);
+    const migratedRecords = migrateRecords(validRecords);
+    if (hasBenefitMigration(validRecords, migratedRecords)) {
+      localStorage.setItem(storageKey, JSON.stringify(migratedRecords));
+    }
+    return migratedRecords;
   } catch {
     return [];
   }
@@ -835,6 +925,37 @@ function syncBenefitField() {
   const isExpense = activeType === "expense";
   benefitField.hidden = !isExpense;
   benefitSelect.disabled = !isExpense;
+  if (isExpense && !benefitSelect.value) {
+    benefitSelect.value = getDefaultBenefit();
+  }
+}
+
+function syncBenefitWithPerson() {
+  if (activeType !== "expense") return;
+  const individualBenefits = people.map((person) => `${person}用`);
+  if (!benefitSelect.value || individualBenefits.includes(benefitSelect.value)) {
+    benefitSelect.value = `${personSelect.value}用`;
+  }
+}
+
+function migrateRecords(items) {
+  return items.map(normalizeRecordBenefit);
+}
+
+function normalizeRecordBenefit(record) {
+  const nextBenefit = normalizeBenefit(record);
+  if (nextBenefit === (record.benefit || "")) return record;
+  return { ...record, benefit: nextBenefit };
+}
+
+function normalizeBenefit(record) {
+  if (record.type !== "expense") return "";
+  if (record.benefit && record.benefit !== "自己用") return record.benefit;
+  return people.includes(record.person) ? `${record.person}用` : getDefaultBenefit();
+}
+
+function hasBenefitMigration(beforeItems, afterItems) {
+  return beforeItems.some((record, index) => (record.benefit || "") !== (afterItems[index]?.benefit || ""));
 }
 
 function isRecord(record) {

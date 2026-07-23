@@ -129,7 +129,13 @@ const minorSelect = document.querySelector("#minorCategory");
 const noteInput = document.querySelector("#note");
 const recentRecordsList = document.querySelector("#recentRecordsList");
 const allRecordsList = document.querySelector("#allRecordsList");
+const recordLimitSelect = document.querySelector("#recordLimit");
 const filterPerson = document.querySelector("#filterPerson");
+const filterCategory = document.querySelector("#filterCategory");
+const detailStartDateInput = document.querySelector("#detailStartDate");
+const detailEndDateInput = document.querySelector("#detailEndDate");
+const clearDetailFiltersBtn = document.querySelector("#clearDetailFiltersBtn");
+const detailResultHint = document.querySelector("#detailResultHint");
 const searchInput = document.querySelector("#searchInput");
 const cloudStatus = document.querySelector("#cloudStatus");
 const cloudHint = document.querySelector("#cloudHint");
@@ -166,7 +172,12 @@ document.querySelectorAll(".segment").forEach((button) => {
 
 majorSelect.addEventListener("change", fillMinorCategories);
 personSelect.addEventListener("change", syncBenefitWithPerson);
+recordLimitSelect.addEventListener("change", render);
 filterPerson.addEventListener("change", render);
+filterCategory.addEventListener("change", render);
+detailStartDateInput.addEventListener("change", render);
+detailEndDateInput.addEventListener("change", render);
+clearDetailFiltersBtn.addEventListener("click", clearDetailFilters);
 searchInput.addEventListener("input", render);
 recentRecordsList.addEventListener("click", handleRecordAction);
 allRecordsList.addEventListener("click", handleRecordAction);
@@ -328,6 +339,7 @@ function shiftCalendarMonth(offset) {
 function handleCalendarClick(event) {
   const dayButton = event.target.closest("[data-calendar-day]");
   if (!dayButton) return;
+  event.stopPropagation();
   const selectedDay = dayButton.dataset.calendarDay;
   const startDate = exportStartDateInput.value;
   const endDate = exportEndDateInput.value;
@@ -335,6 +347,9 @@ function handleCalendarClick(event) {
   if (!startDate || (startDate && endDate)) {
     exportStartDateInput.value = selectedDay;
     exportEndDateInput.value = "";
+    updateDateRangeText();
+    renderCalendar();
+    return;
   } else if (selectedDay < startDate) {
     exportStartDateInput.value = selectedDay;
     exportEndDateInput.value = startDate;
@@ -504,17 +519,32 @@ function fillMinorCategories() {
     .join("");
 }
 
+function fillDetailCategories() {
+  const categories = [
+    ...Object.keys(categoryMap.expense),
+    ...Object.keys(categoryMap.income).filter((name) => !Object.prototype.hasOwnProperty.call(categoryMap.expense, name))
+  ];
+  filterCategory.innerHTML = [
+    `<option value="all">全部类别</option>`,
+    ...categories.map((name) => `<option value="${name}">${displayCategory(name)}</option>`)
+  ].join("");
+}
+
+function clearDetailFilters() {
+  recordLimitSelect.value = "10";
+  filterPerson.value = "all";
+  filterCategory.value = "all";
+  detailStartDateInput.value = "";
+  detailEndDateInput.value = "";
+  searchInput.value = "";
+  render();
+}
+
 function render() {
   const today = getShanghaiDay();
   const monthKey = today.slice(0, 7);
   const monthRecords = records.filter((record) => getRecordDay(record).slice(0, 7) === monthKey);
-  const query = searchInput.value.trim().toLowerCase();
-  const visibleRecords = records.filter((record) => {
-    const personMatched = filterPerson.value === "all" || record.person === filterPerson.value;
-    if (!personMatched) return false;
-    if (!query) return true;
-    return getRecordSearchText(record).includes(query);
-  });
+  const visibleRecords = getVisibleDetailRecords();
 
   document.querySelector("#monthLabel").textContent = `今天 ${formatDay(today)}`;
   document.querySelector("#monthExpense").textContent = money(sum(monthRecords, "expense"));
@@ -528,8 +558,47 @@ function render() {
   });
   renderRecordList(allRecordsList, visibleRecords, {
     emptyText: records.length ? "没有找到匹配记录。" : "还没有记录，先记一笔。",
-    limit: 80
+    limit: visibleRecords.length
   });
+  detailResultHint.textContent = getDetailResultHint(visibleRecords.length);
+}
+
+function getVisibleDetailRecords() {
+  const query = searchInput.value.trim().toLowerCase();
+  const startDate = detailStartDateInput.value;
+  const endDate = detailEndDateInput.value;
+  const hasDateWindow = Boolean(startDate || endDate);
+  const limitValue = recordLimitSelect.value;
+
+  if (startDate && endDate && startDate > endDate) return [];
+
+  const filteredRecords = records.filter((record) => {
+    const day = getRecordDay(record);
+    const personMatched = filterPerson.value === "all" || record.person === filterPerson.value;
+    const categoryMatched = filterCategory.value === "all" || record.major === filterCategory.value;
+    const startMatched = !startDate || day >= startDate;
+    const endMatched = !endDate || day <= endDate;
+    const queryMatched = !query || getRecordSearchText(record).includes(query);
+    return personMatched && categoryMatched && startMatched && endMatched && queryMatched;
+  });
+
+  if (hasDateWindow || limitValue === "all") return filteredRecords;
+  return filteredRecords.slice(0, Number(limitValue));
+}
+
+function getDetailResultHint(count) {
+  if (detailStartDateInput.value && detailEndDateInput.value && detailStartDateInput.value > detailEndDateInput.value) {
+    return "开始日期不能晚于结束日期";
+  }
+  const parts = [`显示 ${count} 条`];
+  if (detailStartDateInput.value || detailEndDateInput.value) {
+    parts.push(`${detailStartDateInput.value || "最早"} 至 ${detailEndDateInput.value || "今天"}`);
+  } else if (recordLimitSelect.value !== "all") {
+    parts.push(recordLimitSelect.options[recordLimitSelect.selectedIndex].textContent);
+  }
+  if (filterCategory.value !== "all") parts.push(displayCategory(filterCategory.value));
+  if (filterPerson.value !== "all") parts.push(displayPerson(filterPerson.value));
+  return parts.join(" · ");
 }
 
 function renderRecordList(listNode, items, options = {}) {
@@ -1093,5 +1162,6 @@ updateDateRangeText();
 renderCalendar();
 syncBenefitField();
 fillMajorCategories();
+fillDetailCategories();
 render();
 initCloud();

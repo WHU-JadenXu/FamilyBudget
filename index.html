@@ -128,13 +128,44 @@
         <section class="records-section">
           <div class="section-heading">
             <h2>全部记录</h2>
-            <select id="filterPerson" aria-label="筛选记账人">
-              <option value="all">全部</option>
-              <option value="李逍宇">👦 李逍宇</option>
-              <option value="徐佳丹">👧 徐佳丹</option>
-            </select>
+          </div>
+          <div class="detail-filters" aria-label="明细筛选">
+            <label>
+              <span>显示</span>
+              <select id="recordLimit">
+                <option value="10">最近 10 条</option>
+                <option value="20">最近 20 条</option>
+                <option value="50">最近 50 条</option>
+                <option value="100">最近 100 条</option>
+                <option value="all">全部</option>
+              </select>
+            </label>
+            <label>
+              <span>记账人</span>
+              <select id="filterPerson" aria-label="筛选记账人">
+                <option value="all">全部</option>
+                <option value="李逍宇">👦 李逍宇</option>
+                <option value="徐佳丹">👧 徐佳丹</option>
+              </select>
+            </label>
+            <label>
+              <span>类别</span>
+              <select id="filterCategory">
+                <option value="all">全部类别</option>
+              </select>
+            </label>
+            <label>
+              <span>开始日期</span>
+              <input id="detailStartDate" type="date" />
+            </label>
+            <label>
+              <span>结束日期</span>
+              <input id="detailEndDate" type="date" />
+            </label>
+            <button id="clearDetailFiltersBtn" type="button">重置筛选</button>
           </div>
           <input id="searchInput" class="record-search" type="search" autocomplete="off" placeholder="搜索分类、备注、日期、金额" />
+          <div id="detailResultHint" class="detail-result-hint"></div>
           <div id="allRecordsList" class="records-list"></div>
         </section>
       </section>

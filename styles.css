@@ -86,11 +86,11 @@ h2 {
 }
 
 .summary-band {
-  padding: 18px;
+  padding: 14px;
   border-radius: 8px;
   background: linear-gradient(135deg, var(--green-dark), var(--green));
   color: #fff;
-  box-shadow: 0 18px 40px rgba(23, 83, 67, 0.18);
+  box-shadow: 0 12px 28px rgba(23, 83, 67, 0.14);
 }
 
 .summary-main span,
@@ -102,30 +102,30 @@ h2 {
 
 .summary-main strong {
   display: block;
-  margin-top: 6px;
-  font-size: 34px;
+  margin-top: 4px;
+  font-size: 28px;
   line-height: 1.08;
 }
 
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 18px;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .summary-grid div {
-  min-height: 66px;
-  padding: 10px;
+  min-height: 52px;
+  padding: 8px;
   border-radius: 7px;
   background: rgba(255, 255, 255, 0.12);
 }
 
 .summary-grid strong {
   display: block;
-  margin-top: 6px;
+  margin-top: 4px;
   overflow-wrap: anywhere;
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .cloud-panel,
@@ -433,7 +433,7 @@ select:focus {
 }
 
 .danger-action {
-  color: var(--danger);
+  color: var(--danger) !important;
 }
 
 .import-button input {
@@ -453,8 +453,40 @@ select:focus {
   min-height: 36px;
 }
 
+.detail-filters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.detail-filters label:nth-child(3),
+.detail-filters button {
+  grid-column: 1 / -1;
+}
+
+.detail-filters button {
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--green-dark);
+  font-weight: 800;
+}
+
 .record-search {
   margin-bottom: 10px;
+}
+
+.detail-result-hint {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .records-list {
@@ -595,10 +627,11 @@ select:focus {
   }
 
   .summary-main strong {
-    font-size: 29px;
+    font-size: 25px;
   }
 
-  .entry-form {
+  .entry-form,
+  .detail-filters {
     grid-template-columns: 1fr;
   }
 

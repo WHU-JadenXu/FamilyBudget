@@ -132,6 +132,8 @@ const syncBtn = document.querySelector("#syncBtn");
 const logoutBtn = document.querySelector("#logoutBtn");
 const submitEntryBtn = document.querySelector("#submitEntryBtn");
 const cancelEditBtn = document.querySelector("#cancelEditBtn");
+const exportStartDateInput = document.querySelector("#exportStartDate");
+const exportEndDateInput = document.querySelector("#exportEndDate");
 
 document.querySelectorAll(".segment").forEach((button) => {
   button.addEventListener("click", () => {
@@ -224,13 +226,10 @@ form.addEventListener("submit", async (event) => {
 
 document.querySelector("#exportBtn").addEventListener("click", () => {
   const blob = new Blob([JSON.stringify(records, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `家庭记账-${getShanghaiDay()}.json`;
-  link.click();
-  URL.revokeObjectURL(url);
+  downloadBlob(blob, `家庭记账-${getShanghaiDay()}.json`);
 });
+
+document.querySelector("#exportExcelBtn").addEventListener("click", exportExcelRecords);
 
 document.querySelector("#importFile").addEventListener("change", async (event) => {
   const file = event.target.files[0];
@@ -254,8 +253,11 @@ document.querySelector("#importFile").addEventListener("change", async (event) =
 });
 
 document.querySelector("#clearBtn").addEventListener("click", async () => {
-  if (!records.length) return;
-  if (!confirm("确定清空当前账本的所有记账记录吗？")) return;
+  if (!records.length && !isCloudReady) return;
+  const storageSize = getLocalStorageSize();
+  const sizeLabel = storageSize ? `\n当前本地数据约 ${formatBytes(storageSize)}。` : "";
+  const countLabel = records.length ? `全部 ${records.length} 条` : "全部";
+  if (!confirm(`确定清空当前账本的${countLabel}记账记录吗？${sizeLabel}\n\n这个操作会清空本地记录；如果已登录同步，也会清空云端数据库记录。`)) return;
 
   if (isCloudReady) {
     const { error } = await supabaseClient.from("records").delete().eq("family_id", familyId);
@@ -268,7 +270,90 @@ document.querySelector("#clearBtn").addEventListener("click", async () => {
   records = [];
   saveRecords();
   render();
+  updateAuthUi();
 });
+
+async function exportExcelRecords() {
+  const startDate = exportStartDateInput.value;
+  const endDate = exportEndDateInput.value;
+
+  if (!startDate || !endDate) {
+    alert("请选择导出 Excel 的开始日期和结束日期。");
+    return;
+  }
+
+  if (startDate > endDate) {
+    alert("开始日期不能晚于结束日期。");
+    return;
+  }
+
+  const scopedRecords = await getRecordsForExport(startDate, endDate);
+  if (!scopedRecords.length) {
+    alert("这个时间段内没有可导出的记录。");
+    return;
+  }
+
+  const rows = scopedRecords
+    .slice()
+    .sort((first, second) => getRecordDay(first).localeCompare(getRecordDay(second)) || (first.createdAt || "").localeCompare(second.createdAt || ""))
+    .map((record) => [
+      getRecordDay(record),
+      record.type === "income" ? "收入" : "支出",
+      displayPerson(record.person),
+      record.amount,
+      displayBenefit(record.benefit),
+      displayCategory(record.major),
+      displayMinor(record.minor),
+      record.note || "",
+      record.createdAt ? formatDateTime(record.createdAt) : ""
+    ]);
+
+  const totals = scopedRecords.reduce(
+    (result, record) => {
+      result[record.type] += record.amount;
+      return result;
+    },
+    { expense: 0, income: 0 }
+  );
+
+  const sheetHtml = buildExcelSheet({
+    title: `家庭记账 ${startDate} 至 ${endDate}`,
+    headers: ["日期", "类型", "记账人", "金额", "花给谁", "大类", "小类", "备注", "创建时间"],
+    rows,
+    summaryRows: [
+      ["", "支出合计", "", totals.expense, "", "", "", "", ""],
+      ["", "收入合计", "", totals.income, "", "", "", "", ""]
+    ]
+  });
+
+  downloadBlob(
+    new Blob([`\ufeff${sheetHtml}`], { type: "application/vnd.ms-excel;charset=utf-8" }),
+    `家庭记账-${startDate}-至-${endDate}.xls`
+  );
+}
+
+async function getRecordsForExport(startDate, endDate) {
+  if (isCloudReady) {
+    const { data, error } = await supabaseClient
+      .from("records")
+      .select("id,type,person,amount,benefit,major,minor,note,spent_on,created_at,created_by")
+      .eq("family_id", familyId)
+      .gte("spent_on", startDate)
+      .lte("spent_on", endDate)
+      .order("spent_on", { ascending: true });
+
+    if (!error) {
+      return data.map(fromCloudRecord).filter(isRecord);
+    }
+
+    setCloudState("导出读取云端失败", "已改用本机记录导出。");
+  }
+
+  return records.filter((record) => {
+    const day = getRecordDay(record);
+    return day >= startDate && day <= endDate;
+  });
+}
 
 function resetForm() {
   form.reset();
@@ -638,6 +723,85 @@ function formatDay(value) {
   return `${Number(month)}月${Number(day)}日`;
 }
 
+function formatDateTime(value) {
+  const parsedDate = new Date(value);
+  if (Number.isNaN(parsedDate.getTime())) return value;
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(parsedDate);
+}
+
+function getMonthStartDay() {
+  return `${getShanghaiDay().slice(0, 7)}-01`;
+}
+
+function buildExcelSheet({ title, headers, rows, summaryRows }) {
+  const tableRows = [
+    `<tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr>`,
+    ...rows.map((row) => `<tr>${row.map(formatExcelCell).join("")}</tr>`),
+    ...summaryRows.map((row) => `<tr>${row.map(formatExcelCell).join("")}</tr>`)
+  ].join("");
+
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { font-family: "Microsoft YaHei", Arial, sans-serif; }
+      table { border-collapse: collapse; }
+      th, td { border: 1px solid #999; padding: 6px 10px; }
+      th { background: #dbeee4; font-weight: 700; }
+      caption { padding: 10px; font-size: 16px; font-weight: 700; text-align: left; }
+    </style>
+  </head>
+  <body>
+    <table>
+      <caption>${escapeHtml(title)}</caption>
+      ${tableRows}
+    </table>
+  </body>
+</html>`;
+}
+
+function formatExcelCell(value) {
+  if (typeof value === "number") {
+    return `<td style="mso-number-format:'0.00';">${value.toFixed(2)}</td>`;
+  }
+  return `<td style="mso-number-format:'\\@';">${escapeHtml(value)}</td>`;
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function getLocalStorageSize() {
+  return new Blob([localStorage.getItem(storageKey) || ""]).size;
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
+
 function displayPerson(person) {
   return personLabels[person] || person;
 }
@@ -690,6 +854,8 @@ function isRecord(record) {
 }
 
 entryDateInput.value = getShanghaiDay();
+exportStartDateInput.value = getMonthStartDay();
+exportEndDateInput.value = getShanghaiDay();
 syncBenefitField();
 fillMajorCategories();
 render();

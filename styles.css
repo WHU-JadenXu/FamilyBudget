@@ -296,7 +296,14 @@ select:focus {
 
 .toolbar {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.date-range {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: 1fr 1fr;
   gap: 10px;
 }
 
@@ -310,6 +317,7 @@ select:focus {
   background: rgba(255, 255, 255, 0.92);
   color: var(--ink);
   font-weight: 700;
+  text-align: center;
 }
 
 .toolbar button:last-child {
@@ -453,6 +461,14 @@ select:focus {
   .form-actions,
   .login-form,
   .cloud-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .toolbar {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .date-range {
     grid-template-columns: 1fr;
   }
 

@@ -117,12 +117,23 @@
       </section>
 
       <section class="toolbar" aria-label="数据工具">
-        <button id="exportBtn" type="button">导出</button>
+        <div class="date-range">
+          <label>
+            <span>开始日期</span>
+            <input id="exportStartDate" type="date" />
+          </label>
+          <label>
+            <span>结束日期</span>
+            <input id="exportEndDate" type="date" />
+          </label>
+        </div>
+        <button id="exportExcelBtn" type="button">导出 Excel</button>
+        <button id="exportBtn" type="button">导出 JSON</button>
         <label class="import-button">
           导入
           <input id="importFile" type="file" accept="application/json" />
         </label>
-        <button id="clearBtn" type="button">清空</button>
+        <button id="clearBtn" type="button">清空全部记录</button>
       </section>
 
       <section class="records-section">

@@ -143,8 +143,16 @@ const submitEntryBtn = document.querySelector("#submitEntryBtn");
 const cancelEditBtn = document.querySelector("#cancelEditBtn");
 const exportStartDateInput = document.querySelector("#exportStartDate");
 const exportEndDateInput = document.querySelector("#exportEndDate");
+const dateRangeBtn = document.querySelector("#dateRangeBtn");
+const dateRangeText = document.querySelector("#dateRangeText");
+const calendarPanel = document.querySelector("#calendarPanel");
+const calendarPrevBtn = document.querySelector("#calendarPrevBtn");
+const calendarNextBtn = document.querySelector("#calendarNextBtn");
+const calendarMonthLabel = document.querySelector("#calendarMonthLabel");
+const calendarGrid = document.querySelector("#calendarGrid");
 const pageNodes = document.querySelectorAll(".app-page");
 const bottomTabs = document.querySelectorAll(".bottom-tab");
+let calendarViewMonth = "";
 
 document.querySelectorAll(".segment").forEach((button) => {
   button.addEventListener("click", () => {
@@ -165,6 +173,11 @@ allRecordsList.addEventListener("click", handleRecordAction);
 syncBtn.addEventListener("click", syncCloudRecords);
 logoutBtn.addEventListener("click", signOut);
 cancelEditBtn.addEventListener("click", cancelEdit);
+dateRangeBtn.addEventListener("click", toggleCalendarPanel);
+calendarPrevBtn.addEventListener("click", () => shiftCalendarMonth(-1));
+calendarNextBtn.addEventListener("click", () => shiftCalendarMonth(1));
+calendarGrid.addEventListener("click", handleCalendarClick);
+document.addEventListener("click", closeCalendarOnOutsideClick);
 bottomTabs.forEach((button) => {
   button.addEventListener("click", () => switchPage(button.dataset.targetPage));
 });
@@ -273,7 +286,13 @@ document.querySelector("#clearBtn").addEventListener("click", async () => {
   const storageSize = getLocalStorageSize();
   const sizeLabel = storageSize ? `\n当前本地数据约 ${formatBytes(storageSize)}。` : "";
   const countLabel = records.length ? `全部 ${records.length} 条` : "全部";
-  if (!confirm(`确定清空当前账本的${countLabel}记账记录吗？${sizeLabel}\n\n这个操作会清空本地记录；如果已登录同步，也会清空云端数据库记录。`)) return;
+  const captcha = createCaptchaCode();
+  const answer = prompt(`确定清空当前账本的${countLabel}记账记录吗？${sizeLabel}\n\n这个操作会清空本地记录；如果已登录同步，也会清空云端数据库记录。\n\n请输入验证码 ${captcha} 后继续：`);
+  if (answer === null) return;
+  if (answer.trim().toLowerCase() !== captcha.toLowerCase()) {
+    alert("验证码不一致，已取消清空。");
+    return;
+  }
 
   if (isCloudReady) {
     const { error } = await supabaseClient.from("records").delete().eq("family_id", familyId);
@@ -288,6 +307,79 @@ document.querySelector("#clearBtn").addEventListener("click", async () => {
   render();
   updateAuthUi();
 });
+
+function toggleCalendarPanel(event) {
+  event.stopPropagation();
+  calendarPanel.hidden = !calendarPanel.hidden;
+  if (!calendarPanel.hidden) renderCalendar();
+}
+
+function closeCalendarOnOutsideClick(event) {
+  if (calendarPanel.hidden) return;
+  if (calendarPanel.contains(event.target) || dateRangeBtn.contains(event.target)) return;
+  calendarPanel.hidden = true;
+}
+
+function shiftCalendarMonth(offset) {
+  calendarViewMonth = addMonths(calendarViewMonth, offset);
+  renderCalendar();
+}
+
+function handleCalendarClick(event) {
+  const dayButton = event.target.closest("[data-calendar-day]");
+  if (!dayButton) return;
+  const selectedDay = dayButton.dataset.calendarDay;
+  const startDate = exportStartDateInput.value;
+  const endDate = exportEndDateInput.value;
+
+  if (!startDate || (startDate && endDate)) {
+    exportStartDateInput.value = selectedDay;
+    exportEndDateInput.value = "";
+  } else if (selectedDay < startDate) {
+    exportStartDateInput.value = selectedDay;
+    exportEndDateInput.value = startDate;
+    calendarPanel.hidden = true;
+  } else {
+    exportEndDateInput.value = selectedDay;
+    calendarPanel.hidden = true;
+  }
+
+  updateDateRangeText();
+  renderCalendar();
+}
+
+function renderCalendar() {
+  const [year, month] = calendarViewMonth.split("-").map(Number);
+  const firstDay = new Date(year, month - 1, 1);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const leadingDays = (firstDay.getDay() + 6) % 7;
+  const startDate = exportStartDateInput.value;
+  const endDate = exportEndDateInput.value;
+
+  calendarMonthLabel.textContent = `${year}年${month}月`;
+  calendarGrid.innerHTML = "";
+
+  for (let index = 0; index < leadingDays; index += 1) {
+    calendarGrid.appendChild(document.createElement("span"));
+  }
+
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const dayValue = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.calendarDay = dayValue;
+    button.textContent = String(day);
+    button.classList.toggle("selected", dayValue === startDate || dayValue === endDate);
+    button.classList.toggle("in-range", Boolean(startDate && endDate && dayValue > startDate && dayValue < endDate));
+    calendarGrid.appendChild(button);
+  }
+}
+
+function updateDateRangeText() {
+  const startDate = exportStartDateInput.value;
+  const endDate = exportEndDateInput.value;
+  dateRangeText.textContent = endDate ? `${formatInputDate(startDate)} - ${formatInputDate(endDate)}` : `${formatInputDate(startDate)} - 请选择结束日期`;
+}
 
 async function exportExcelRecords() {
   const startDate = exportStartDateInput.value;
@@ -824,6 +916,25 @@ function getMonthStartDay() {
   return `${getShanghaiDay().slice(0, 7)}-01`;
 }
 
+function addMonths(monthValue, offset) {
+  const [year, month] = monthValue.split("-").map(Number);
+  const nextMonth = new Date(year, month - 1 + offset, 1);
+  return `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function formatInputDate(value) {
+  return value ? value.replaceAll("-", "/") : "";
+}
+
+function createCaptchaCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  let code = "";
+  for (let index = 0; index < 4; index += 1) {
+    code += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return code;
+}
+
 function buildExcelSheet({ title, headers, rows, summaryRows }) {
   const tableRows = [
     `<tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr>`,
@@ -977,6 +1088,9 @@ function isRecord(record) {
 entryDateInput.value = getShanghaiDay();
 exportStartDateInput.value = getMonthStartDay();
 exportEndDateInput.value = getShanghaiDay();
+calendarViewMonth = exportStartDateInput.value.slice(0, 7);
+updateDateRangeText();
+renderCalendar();
 syncBenefitField();
 fillMajorCategories();
 render();

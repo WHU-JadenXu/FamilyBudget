@@ -304,18 +304,122 @@ select:focus {
 
 .toolbar {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
+  gap: 14px;
 }
 
-.date-range {
+.date-range-picker {
+  position: relative;
   display: grid;
-  grid-column: 1 / -1;
+  gap: 8px;
+}
+
+.date-range-picker > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.date-range-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 58px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+  color: var(--ink);
+  padding: 0 14px;
+  text-align: left;
+}
+
+.date-range-button strong {
+  font-size: 18px;
+  letter-spacing: 0;
+}
+
+.date-range-button span {
+  flex: 0 0 auto;
+  color: var(--green-dark);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.calendar-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  z-index: 9;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 18px 38px rgba(31, 36, 36, 0.14);
+}
+
+.calendar-head,
+.calendar-weekdays,
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+
+.calendar-head {
+  grid-template-columns: 40px 1fr 40px;
+  align-items: center;
+}
+
+.calendar-head strong {
+  text-align: center;
+}
+
+.calendar-head button,
+.calendar-grid button {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.calendar-weekdays span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.calendar-grid button.in-range {
+  border-color: #dbeee4;
+  background: #eef8f3;
+}
+
+.calendar-grid button.selected {
+  border-color: var(--green-dark);
+  background: var(--green);
+  color: #fff;
+}
+
+.wide-action,
+.danger-action {
+  width: 100%;
+  min-height: 56px;
+}
+
+.json-actions {
+  display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
 }
 
-.toolbar button,
+.toolbar > button,
+.json-actions button,
 .import-button {
   display: grid;
   place-items: center;
@@ -328,7 +432,7 @@ select:focus {
   text-align: center;
 }
 
-.toolbar button:last-child {
+.danger-action {
   color: var(--danger);
 }
 
@@ -504,11 +608,7 @@ select:focus {
     grid-template-columns: 1fr;
   }
 
-  .toolbar {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .date-range {
+  .json-actions {
     grid-template-columns: 1fr;
   }
 

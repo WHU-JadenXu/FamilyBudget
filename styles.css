@@ -465,6 +465,7 @@ select:focus {
 }
 
 .detail-filters label:nth-child(3),
+.detail-date-picker,
 .detail-filters button {
   grid-column: 1 / -1;
 }

@@ -154,14 +154,15 @@
                 <option value="all">全部类别</option>
               </select>
             </label>
-            <label>
-              <span>开始日期</span>
-              <input id="detailStartDate" type="date" />
-            </label>
-            <label>
-              <span>结束日期</span>
-              <input id="detailEndDate" type="date" />
-            </label>
+            <div class="date-range-picker detail-date-picker">
+              <span>明细时间段</span>
+              <button id="detailDateRangeBtn" class="date-range-button" type="button">
+                <strong id="detailDateRangeText">不限时间</strong>
+                <span>选择日期</span>
+              </button>
+              <input id="detailStartDate" type="hidden" />
+              <input id="detailEndDate" type="hidden" />
+            </div>
             <button id="clearDetailFiltersBtn" type="button">重置筛选</button>
           </div>
           <input id="searchInput" class="record-search" type="search" autocomplete="off" placeholder="搜索分类、备注、日期、金额" />

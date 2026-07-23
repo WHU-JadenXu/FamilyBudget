@@ -132,6 +132,8 @@ const allRecordsList = document.querySelector("#allRecordsList");
 const recordLimitSelect = document.querySelector("#recordLimit");
 const filterPerson = document.querySelector("#filterPerson");
 const filterCategory = document.querySelector("#filterCategory");
+const detailDateRangeBtn = document.querySelector("#detailDateRangeBtn");
+const detailDateRangeText = document.querySelector("#detailDateRangeText");
 const detailStartDateInput = document.querySelector("#detailStartDate");
 const detailEndDateInput = document.querySelector("#detailEndDate");
 const clearDetailFiltersBtn = document.querySelector("#clearDetailFiltersBtn");
@@ -159,6 +161,7 @@ const calendarGrid = document.querySelector("#calendarGrid");
 const pageNodes = document.querySelectorAll(".app-page");
 const bottomTabs = document.querySelectorAll(".bottom-tab");
 let calendarViewMonth = "";
+let activeCalendarTarget = "export";
 
 document.querySelectorAll(".segment").forEach((button) => {
   button.addEventListener("click", () => {
@@ -175,8 +178,6 @@ personSelect.addEventListener("change", syncBenefitWithPerson);
 recordLimitSelect.addEventListener("change", render);
 filterPerson.addEventListener("change", render);
 filterCategory.addEventListener("change", render);
-detailStartDateInput.addEventListener("change", render);
-detailEndDateInput.addEventListener("change", render);
 clearDetailFiltersBtn.addEventListener("click", clearDetailFilters);
 searchInput.addEventListener("input", render);
 recentRecordsList.addEventListener("click", handleRecordAction);
@@ -184,7 +185,8 @@ allRecordsList.addEventListener("click", handleRecordAction);
 syncBtn.addEventListener("click", syncCloudRecords);
 logoutBtn.addEventListener("click", signOut);
 cancelEditBtn.addEventListener("click", cancelEdit);
-dateRangeBtn.addEventListener("click", toggleCalendarPanel);
+dateRangeBtn.addEventListener("click", (event) => toggleCalendarPanel(event, "export"));
+detailDateRangeBtn.addEventListener("click", (event) => toggleCalendarPanel(event, "detail"));
 calendarPrevBtn.addEventListener("click", () => shiftCalendarMonth(-1));
 calendarNextBtn.addEventListener("click", () => shiftCalendarMonth(1));
 calendarGrid.addEventListener("click", handleCalendarClick);
@@ -319,15 +321,22 @@ document.querySelector("#clearBtn").addEventListener("click", async () => {
   updateAuthUi();
 });
 
-function toggleCalendarPanel(event) {
+function toggleCalendarPanel(event, target) {
   event.stopPropagation();
-  calendarPanel.hidden = !calendarPanel.hidden;
-  if (!calendarPanel.hidden) renderCalendar();
+  const isSameOpenTarget = !calendarPanel.hidden && activeCalendarTarget === target;
+  activeCalendarTarget = target;
+  getCalendarContainer(target).appendChild(calendarPanel);
+  calendarPanel.hidden = isSameOpenTarget;
+  if (!calendarPanel.hidden) {
+    const startInput = getCalendarStartInput();
+    calendarViewMonth = (startInput.value || getShanghaiDay()).slice(0, 7);
+    renderCalendar();
+  }
 }
 
 function closeCalendarOnOutsideClick(event) {
   if (calendarPanel.hidden) return;
-  if (calendarPanel.contains(event.target) || dateRangeBtn.contains(event.target)) return;
+  if (calendarPanel.contains(event.target) || dateRangeBtn.contains(event.target) || detailDateRangeBtn.contains(event.target)) return;
   calendarPanel.hidden = true;
 }
 
@@ -341,26 +350,30 @@ function handleCalendarClick(event) {
   if (!dayButton) return;
   event.stopPropagation();
   const selectedDay = dayButton.dataset.calendarDay;
-  const startDate = exportStartDateInput.value;
-  const endDate = exportEndDateInput.value;
+  const startInput = getCalendarStartInput();
+  const endInput = getCalendarEndInput();
+  const startDate = startInput.value;
+  const endDate = endInput.value;
 
   if (!startDate || (startDate && endDate)) {
-    exportStartDateInput.value = selectedDay;
-    exportEndDateInput.value = "";
-    updateDateRangeText();
+    startInput.value = selectedDay;
+    endInput.value = "";
+    updateActiveDateRangeText();
     renderCalendar();
+    if (activeCalendarTarget === "detail") render();
     return;
   } else if (selectedDay < startDate) {
-    exportStartDateInput.value = selectedDay;
-    exportEndDateInput.value = startDate;
+    startInput.value = selectedDay;
+    endInput.value = startDate;
     calendarPanel.hidden = true;
   } else {
-    exportEndDateInput.value = selectedDay;
+    endInput.value = selectedDay;
     calendarPanel.hidden = true;
   }
 
-  updateDateRangeText();
+  updateActiveDateRangeText();
   renderCalendar();
+  if (activeCalendarTarget === "detail") render();
 }
 
 function renderCalendar() {
@@ -368,8 +381,8 @@ function renderCalendar() {
   const firstDay = new Date(year, month - 1, 1);
   const daysInMonth = new Date(year, month, 0).getDate();
   const leadingDays = (firstDay.getDay() + 6) % 7;
-  const startDate = exportStartDateInput.value;
-  const endDate = exportEndDateInput.value;
+  const startDate = getCalendarStartInput().value;
+  const endDate = getCalendarEndInput().value;
 
   calendarMonthLabel.textContent = `${year}年${month}月`;
   calendarGrid.innerHTML = "";
@@ -394,6 +407,36 @@ function updateDateRangeText() {
   const startDate = exportStartDateInput.value;
   const endDate = exportEndDateInput.value;
   dateRangeText.textContent = endDate ? `${formatInputDate(startDate)} - ${formatInputDate(endDate)}` : `${formatInputDate(startDate)} - 请选择结束日期`;
+}
+
+function updateDetailDateRangeText() {
+  const startDate = detailStartDateInput.value;
+  const endDate = detailEndDateInput.value;
+  if (!startDate && !endDate) {
+    detailDateRangeText.textContent = "不限时间";
+    return;
+  }
+  detailDateRangeText.textContent = endDate ? `${formatInputDate(startDate)} - ${formatInputDate(endDate)}` : `${formatInputDate(startDate)} - 请选择结束日期`;
+}
+
+function updateActiveDateRangeText() {
+  if (activeCalendarTarget === "detail") {
+    updateDetailDateRangeText();
+    return;
+  }
+  updateDateRangeText();
+}
+
+function getCalendarStartInput() {
+  return activeCalendarTarget === "detail" ? detailStartDateInput : exportStartDateInput;
+}
+
+function getCalendarEndInput() {
+  return activeCalendarTarget === "detail" ? detailEndDateInput : exportEndDateInput;
+}
+
+function getCalendarContainer(target) {
+  return target === "detail" ? detailDateRangeBtn.parentElement : dateRangeBtn.parentElement;
 }
 
 async function exportExcelRecords() {
@@ -537,6 +580,7 @@ function clearDetailFilters() {
   detailStartDateInput.value = "";
   detailEndDateInput.value = "";
   searchInput.value = "";
+  updateDetailDateRangeText();
   render();
 }
 
@@ -1159,6 +1203,7 @@ exportStartDateInput.value = getMonthStartDay();
 exportEndDateInput.value = getShanghaiDay();
 calendarViewMonth = exportStartDateInput.value.slice(0, 7);
 updateDateRangeText();
+updateDetailDateRangeText();
 renderCalendar();
 syncBenefitField();
 fillMajorCategories();

@@ -722,6 +722,7 @@ async function handleReceiptImage(event) {
   try {
     const recognizedRecords = [];
     let skippedCount = 0;
+    let incompleteCount = 0;
     let unreadableCount = invalidFileCount;
 
     for (let index = 0; index < files.length; index += 1) {
@@ -731,14 +732,27 @@ async function handleReceiptImage(event) {
         preparedImage = await withReceiptTimeout(prepareReceiptImage(files[index]), 15000, "IMAGE_TIMEOUT");
         setReceiptScanStatus(`正在处理第 ${index + 1}/${files.length} 张：识别文字…`);
         const worker = await withReceiptTimeout(getReceiptOcrWorker(), 90000, "MODEL_TIMEOUT");
-        let result = await withReceiptTimeout(worker.recognize(preparedImage.blob), 45000, "OCR_TIMEOUT");
+        let result = await withReceiptTimeout(
+          worker.recognize(preparedImage.blob, {}, { text: true, tsv: true }),
+          45000,
+          "OCR_TIMEOUT"
+        );
         const recognizedText = result.data.text || "";
+        const spatialBatchResult = extractSpatialBatchReceiptRecords(
+          result.data.tsv || "",
+          recognizedText,
+          preparedImage.width,
+          preparedImage.height
+        );
         result = null;
-        const batchResult = extractBatchReceiptRecords(recognizedText);
+        const batchResult = spatialBatchResult.candidateCount
+          ? spatialBatchResult
+          : extractBatchReceiptRecords(recognizedText);
         skippedCount += batchResult.skippedCount;
+        incompleteCount += batchResult.incompleteCount || 0;
         if (batchResult.records.length) {
           recognizedRecords.push(...batchResult.records);
-        } else {
+        } else if (!spatialBatchResult.candidateCount) {
           const parsed = parseReceiptText(recognizedText);
           if (parsed.amount) recognizedRecords.push(parsed);
           else unreadableCount += 1;
@@ -755,11 +769,16 @@ async function handleReceiptImage(event) {
 
     const uniqueRecords = recognizedRecords;
     if (!uniqueRecords.length) {
-      setReceiptScanStatus("这些截图中没有识别到可用金额，请换更清晰的原图后重试。", "error");
-    } else if (files.length === 1 && uniqueRecords.length === 1 && !unreadableCount && !skippedCount) {
+      setReceiptScanStatus(
+        incompleteCount
+          ? `检测到 ${incompleteCount} 条位于图片边缘或信息不完整的记录，已全部忽略。`
+          : "这些截图中没有识别到可用金额，请换更清晰的原图后重试。",
+        "error"
+      );
+    } else if (files.length === 1 && uniqueRecords.length === 1 && !unreadableCount && !skippedCount && !incompleteCount) {
       applyReceiptResult(uniqueRecords[0]);
     } else {
-      applyReceiptBatchResult({ records: uniqueRecords, skippedCount, unreadableCount });
+      applyReceiptBatchResult({ records: uniqueRecords, skippedCount, incompleteCount, unreadableCount });
     }
     scheduleReceiptWorkerRelease();
   } catch (error) {
@@ -780,8 +799,8 @@ async function prepareReceiptImage(file) {
   const image = await decodeReceiptImage(file);
   const sourceWidth = image.width || image.naturalWidth;
   const sourceHeight = image.height || image.naturalHeight;
-  const maxEdge = 1800;
-  const maxPixels = 2400000;
+  const maxEdge = 2200;
+  const maxPixels = 3000000;
   const edgeScale = Math.min(1, maxEdge / Math.max(sourceWidth, sourceHeight));
   const pixelScale = Math.min(1, Math.sqrt(maxPixels / (sourceWidth * sourceHeight)));
   const scale = Math.min(edgeScale, pixelScale);
@@ -985,6 +1004,183 @@ function toValidDate(year, month, day) {
   const value = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   const parsed = new Date(`${value}T12:00:00+08:00`);
   return Number.isNaN(parsed.getTime()) || getShanghaiDay(parsed) !== value ? "" : value;
+}
+
+function extractSpatialBatchReceiptRecords(tsv, rawText, imageWidth, imageHeight) {
+  const words = parseReceiptTsv(tsv);
+  if (!words.length || !imageWidth || !imageHeight) {
+    return { records: [], skippedCount: 0, incompleteCount: 0, candidateCount: 0 };
+  }
+
+  const amountCandidates = words
+    .map((word) => getSpatialAmountCandidate(word, words, imageWidth, imageHeight))
+    .filter(Boolean)
+    .sort((left, right) => left.centerY - right.centerY);
+  if (!amountCandidates.length) {
+    return { records: [], skippedCount: 0, incompleteCount: 0, candidateCount: 0 };
+  }
+
+  const lines = groupReceiptTsvLines(words);
+  let skippedCount = 0;
+  let incompleteCount = 0;
+  const edgeMargin = Math.max(24, Math.min(70, imageHeight * 0.025));
+  const records = amountCandidates.flatMap((candidate, index) => {
+    const previousCandidate = amountCandidates[index - 1];
+    const nextCandidate = amountCandidates[index + 1];
+    const previousGap = previousCandidate ? candidate.centerY - previousCandidate.centerY : 0;
+    const nextGap = nextCandidate ? nextCandidate.centerY - candidate.centerY : 0;
+    const fallbackHalfSpan = Math.min(500, imageHeight * 0.28);
+    const top = previousCandidate ? (previousCandidate.centerY + candidate.centerY) / 2 : candidate.centerY - (nextGap ? nextGap / 2 : fallbackHalfSpan);
+    const bottom = nextCandidate ? (candidate.centerY + nextCandidate.centerY) / 2 : candidate.centerY + (previousGap ? previousGap / 2 : fallbackHalfSpan);
+    const regionWords = words.filter((word) => word.centerY >= top && word.centerY < bottom);
+    const regionText = regionWords
+      .sort((left, right) => left.centerY - right.centerY || left.left - right.left)
+      .map((word) => word.text)
+      .join(" ");
+
+    const touchesImageEdge = candidate.top <= edgeMargin || candidate.bottom >= imageHeight - edgeMargin;
+    const note = findSpatialMerchant(candidate, regionWords, lines, top, bottom);
+    const hasDateOrTime = /(?:今天|昨天|前天|\d{1,2}\s*[:：]\s*\d{2}|20\d{2}\s*[年./-]\s*\d{1,2}\s*[月./-]\s*\d{1,2})/.test(
+      regionText
+    );
+    if (touchesImageEdge || !note || !hasDateOrTime) {
+      incompleteCount += 1;
+      return [];
+    }
+
+    if (/(?:等待付款|待付款|待支付|未支付|交易关闭|已关闭|已取消)/.test(regionText)) {
+      skippedCount += 1;
+      return [];
+    }
+
+    const category = inferReceiptCategory(`${note} ${regionText}`, candidate.type);
+    return [
+      {
+        type: candidate.type,
+        amount: candidate.amount,
+        date: inferBatchReceiptDate(`${regionText} ${rawText.includes("今天") ? "今天" : ""}`),
+        major: category.major,
+        minor: category.minor,
+        note: note || `${category.major}/${category.minor}（流水截图识别）`
+      }
+    ];
+  });
+
+  return { records, skippedCount, incompleteCount, candidateCount: amountCandidates.length };
+}
+
+function parseReceiptTsv(tsv) {
+  return String(tsv || "")
+    .split(/\r?\n/)
+    .slice(1)
+    .map((row) => row.split("\t"))
+    .filter((columns) => columns.length >= 12 && Number(columns[0]) === 5)
+    .map((columns) => {
+      const left = Number(columns[6]);
+      const top = Number(columns[7]);
+      const width = Number(columns[8]);
+      const height = Number(columns[9]);
+      return {
+        block: Number(columns[2]),
+        paragraph: Number(columns[3]),
+        line: Number(columns[4]),
+        text: columns.slice(11).join("\t").trim(),
+        confidence: Number(columns[10]),
+        left,
+        top,
+        right: left + width,
+        bottom: top + height,
+        width,
+        height,
+        centerX: left + width / 2,
+        centerY: top + height / 2
+      };
+    })
+    .filter((word) => word.text && word.width > 0 && word.height > 0 && word.confidence >= 0);
+}
+
+function getSpatialAmountCandidate(word, words, imageWidth, imageHeight) {
+  const normalizedText = word.text.replace(/[￥]/g, "¥").replace(/\s+/g, "");
+  const signedMatch = normalizedText.match(/([+＋\-−–—﹣－])¥?([0-9][0-9,]*(?:\.[0-9]{1,2})?)/);
+  if (signedMatch) {
+    const amount = parseOcrAmountToken(signedMatch[2]);
+    if (!Number.isFinite(amount) || amount <= 0 || amount >= 10000000) return null;
+    return { ...word, amount, type: ["+", "＋"].includes(signedMatch[1]) ? "income" : "expense" };
+  }
+
+  const numberMatch = normalizedText.match(/^¥?([0-9][0-9,]*\.[0-9]{1,2})$/);
+  if (!numberMatch) return null;
+  const amount = parseOcrAmountToken(numberMatch[1]);
+  if (!Number.isFinite(amount) || amount <= 0 || amount >= 10000000) return null;
+
+  const nearbySign = words.find(
+    (candidate) =>
+      /^[+＋\-−–—﹣－]$/.test(candidate.text.trim()) &&
+      candidate.right <= word.left + 12 &&
+      word.left - candidate.right <= Math.max(55, word.height * 2) &&
+      Math.abs(candidate.centerY - word.centerY) <= Math.max(18, word.height)
+  );
+  if (nearbySign) {
+    return { ...word, amount, type: ["+", "＋"].includes(nearbySign.text.trim()) ? "income" : "expense" };
+  }
+
+  const isRightColumnAmount = word.centerX >= imageWidth * 0.72 && word.centerY >= imageHeight * 0.3;
+  return isRightColumnAmount ? { ...word, amount, type: "expense" } : null;
+}
+
+function groupReceiptTsvLines(words) {
+  const groups = new Map();
+  words.forEach((word) => {
+    const key = `${word.block}:${word.paragraph}:${word.line}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(word);
+  });
+  return [...groups.values()].map((lineWords) => {
+    const sortedWords = [...lineWords].sort((left, right) => left.left - right.left);
+    return {
+      words: sortedWords,
+      text: sortedWords.map((word) => word.text).join(" "),
+      left: Math.min(...sortedWords.map((word) => word.left)),
+      right: Math.max(...sortedWords.map((word) => word.right)),
+      top: Math.min(...sortedWords.map((word) => word.top)),
+      bottom: Math.max(...sortedWords.map((word) => word.bottom)),
+      centerY: sortedWords.reduce((total, word) => total + word.centerY, 0) / sortedWords.length
+    };
+  });
+}
+
+function findSpatialMerchant(candidate, regionWords, lines, top, bottom) {
+  const sameRowWords = regionWords
+    .filter(
+      (word) =>
+        word.right < candidate.left - 3 &&
+        Math.abs(word.centerY - candidate.centerY) <= Math.max(24, candidate.height * 1.25) &&
+        !isSpatialNoiseWord(word.text)
+    )
+    .sort((left, right) => left.left - right.left);
+  const sameRowText = cleanSpatialMerchant(sameRowWords.map((word) => word.text).join(" "));
+  if (isBatchMerchantCandidate(sameRowText)) return sameRowText;
+
+  const nearbyLines = lines
+    .filter((line) => line.centerY >= top && line.centerY < bottom && line.right < candidate.right && line.centerY <= candidate.centerY + 24)
+    .map((line) => ({ ...line, cleanText: cleanSpatialMerchant(line.text) }))
+    .filter((line) => isBatchMerchantCandidate(line.cleanText))
+    .sort((left, right) => Math.abs(left.centerY - candidate.centerY) - Math.abs(right.centerY - candidate.centerY));
+  return nearbyLines[0]?.cleanText || "";
+}
+
+function cleanSpatialMerchant(value) {
+  return cleanBatchMerchant(
+    String(value || "")
+      .replace(/[+＋\-−–—﹣－]?\s*[¥￥]?\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?/g, "")
+      .replace(/(?:餐饮美食|日用百货|交通出行|服饰装扮|医疗健康|今天|昨天)\s*[\d:：]*/g, "")
+  );
+}
+
+function isSpatialNoiseWord(value) {
+  return /^(?:全部|支出|收入|转账|退款|订单|筛选|搜索|收支分析|餐饮美食|日用百货|今天|昨天|\d{1,2}:\d{2})$/.test(
+    String(value || "").trim()
+  );
 }
 
 function extractBatchReceiptRecords(rawText) {
@@ -1192,9 +1388,10 @@ function applyReceiptBatchResult(result) {
     .join("");
   updateReceiptBatchButton();
   const skippedHint = result.skippedCount ? `，另有 ${result.skippedCount} 条未付款或已关闭记录已跳过` : "";
+  const incompleteHint = result.incompleteCount ? `，${result.incompleteCount} 条边缘残缺记录已忽略` : "";
   const unreadableHint = result.unreadableCount ? `，${result.unreadableCount} 张未识别或格式不符合要求` : "";
   setReceiptScanStatus(
-    `已识别 ${pendingReceiptRecords.length} 条流水${skippedHint}${unreadableHint}。请核对勾选项后批量加入账本。`,
+    `已识别 ${pendingReceiptRecords.length} 条流水${skippedHint}${incompleteHint}${unreadableHint}。请核对勾选项后批量加入账本。`,
     "success"
   );
 }

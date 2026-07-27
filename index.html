@@ -68,7 +68,7 @@
 
           <section class="receipt-scan" aria-labelledby="receiptScanTitle">
             <div class="receipt-scan-copy">
-              <strong id="receiptScanTitle">支付截图智能填单</strong>
+              <strong id="receiptScanTitle">单笔支付截图智能填单</strong>
             </div>
             <label class="receipt-upload">
               <span id="receiptUploadText">选择截图</span>
@@ -77,8 +77,8 @@
             <div id="receiptScanStatus" class="receipt-scan-status" role="status" aria-live="polite"></div>
             <section id="receiptBatchPanel" class="receipt-batch" aria-labelledby="receiptBatchTitle" hidden>
               <div class="receipt-batch-head">
-                <strong id="receiptBatchTitle">识别到多条流水</strong>
-                <span>请取消勾选不需要的记录，再批量加入账本。</span>
+                <strong id="receiptBatchTitle">识别到多张单笔截图</strong>
+                <span>每张截图只生成一条记录，请核对后加入账本。</span>
               </div>
               <div id="receiptBatchList" class="receipt-batch-list"></div>
               <div class="receipt-batch-actions">
@@ -266,6 +266,6 @@
     <script src="./config.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
-    <script src="./app.js?v=20260727-compact-form-2"></script>
+    <script src="./app.js?v=20260727-single-receipt-1"></script>
   </body>
 </html>

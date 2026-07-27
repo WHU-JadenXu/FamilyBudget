@@ -237,6 +237,78 @@ h2 {
   box-shadow: 0 6px 16px rgba(31, 36, 36, 0.09);
 }
 
+.receipt-scan {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid #c9ded6;
+  border-radius: 8px;
+  background: #f2f8f5;
+}
+
+.receipt-scan-copy strong,
+.receipt-scan-copy span {
+  display: block;
+}
+
+.receipt-scan-copy strong {
+  color: var(--green-dark);
+  font-size: 14px;
+}
+
+.receipt-scan-copy span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.receipt-upload {
+  display: grid;
+  place-items: center;
+  min-height: 44px;
+  border: 1px solid var(--green);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--green-dark);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.receipt-upload span {
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+.receipt-upload input {
+  display: none;
+}
+
+.receipt-upload.is-busy {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.receipt-scan-status {
+  min-height: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.receipt-scan-status.success {
+  color: var(--green-dark);
+  font-weight: 700;
+}
+
+.receipt-scan-status.error {
+  color: var(--danger);
+  font-weight: 700;
+}
+
 .entry-form {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -476,7 +548,6 @@ select:focus {
   background: rgba(255, 255, 255, 0.88);
 }
 
-.detail-filters label:nth-child(3),
 .detail-date-picker,
 #clearDetailFiltersBtn {
   grid-column: 1 / -1;

@@ -131,6 +131,7 @@ const recentRecordsList = document.querySelector("#recentRecordsList");
 const allRecordsList = document.querySelector("#allRecordsList");
 const recordLimitSelect = document.querySelector("#recordLimit");
 const filterPerson = document.querySelector("#filterPerson");
+const filterType = document.querySelector("#filterType");
 const filterCategory = document.querySelector("#filterCategory");
 const detailDateRangeBtn = document.querySelector("#detailDateRangeBtn");
 const detailDateRangeText = document.querySelector("#detailDateRangeText");
@@ -139,6 +140,9 @@ const detailEndDateInput = document.querySelector("#detailEndDate");
 const clearDetailFiltersBtn = document.querySelector("#clearDetailFiltersBtn");
 const detailResultHint = document.querySelector("#detailResultHint");
 const searchInput = document.querySelector("#searchInput");
+const receiptImageInput = document.querySelector("#receiptImageInput");
+const receiptUploadText = document.querySelector("#receiptUploadText");
+const receiptScanStatus = document.querySelector("#receiptScanStatus");
 const cloudStatus = document.querySelector("#cloudStatus");
 const cloudHint = document.querySelector("#cloudHint");
 const loginForm = document.querySelector("#loginForm");
@@ -177,6 +181,7 @@ majorSelect.addEventListener("change", fillMinorCategories);
 personSelect.addEventListener("change", syncBenefitWithPerson);
 recordLimitSelect.addEventListener("change", render);
 filterPerson.addEventListener("change", render);
+filterType.addEventListener("change", render);
 filterCategory.addEventListener("change", render);
 clearDetailFiltersBtn.addEventListener("click", clearDetailFilters);
 searchInput.addEventListener("input", render);
@@ -194,6 +199,7 @@ document.addEventListener("click", closeCalendarOnOutsideClick);
 bottomTabs.forEach((button) => {
   button.addEventListener("click", () => switchPage(button.dataset.targetPage));
 });
+receiptImageInput.addEventListener("change", handleReceiptImage);
 
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -576,6 +582,7 @@ function fillDetailCategories() {
 function clearDetailFilters() {
   recordLimitSelect.value = "10";
   filterPerson.value = "all";
+  filterType.value = "all";
   filterCategory.value = "all";
   detailStartDateInput.value = "";
   detailEndDateInput.value = "";
@@ -596,7 +603,8 @@ function render() {
   document.querySelector("#liTotal").textContent = money(sum(monthRecords.filter((record) => record.person === "李逍宇"), "expense"));
   document.querySelector("#xuTotal").textContent = money(sum(monthRecords.filter((record) => record.person === "徐佳丹"), "expense"));
 
-  renderRecordList(recentRecordsList, records.slice(0, 5), {
+  const dateSortedRecords = sortRecordsBySpentDate(records);
+  renderRecordList(recentRecordsList, dateSortedRecords.slice(0, 5), {
     emptyText: "还没有记录，先记一笔。",
     limit: 5
   });
@@ -619,15 +627,17 @@ function getVisibleDetailRecords() {
   const filteredRecords = records.filter((record) => {
     const day = getRecordDay(record);
     const personMatched = filterPerson.value === "all" || record.person === filterPerson.value;
+    const typeMatched = filterType.value === "all" || record.type === filterType.value;
     const categoryMatched = filterCategory.value === "all" || record.major === filterCategory.value;
     const startMatched = !startDate || day >= startDate;
     const endMatched = !endDate || day <= endDate;
     const queryMatched = !query || getRecordSearchText(record).includes(query);
-    return personMatched && categoryMatched && startMatched && endMatched && queryMatched;
+    return personMatched && typeMatched && categoryMatched && startMatched && endMatched && queryMatched;
   });
+  const sortedRecords = sortRecordsBySpentDate(filteredRecords);
 
-  if (hasDateWindow || limitValue === "all") return filteredRecords;
-  return filteredRecords.slice(0, Number(limitValue));
+  if (hasDateWindow || limitValue === "all") return sortedRecords;
+  return sortedRecords.slice(0, Number(limitValue));
 }
 
 function getDetailResultHint(count) {
@@ -641,8 +651,195 @@ function getDetailResultHint(count) {
     parts.push(recordLimitSelect.options[recordLimitSelect.selectedIndex].textContent);
   }
   if (filterCategory.value !== "all") parts.push(displayCategory(filterCategory.value));
+  if (filterType.value !== "all") parts.push(filterType.value === "income" ? "收入" : "支出");
   if (filterPerson.value !== "all") parts.push(displayPerson(filterPerson.value));
   return parts.join(" · ");
+}
+
+function sortRecordsBySpentDate(items) {
+  return [...items].sort((left, right) => {
+    const dateDifference = getRecordDay(right).localeCompare(getRecordDay(left));
+    if (dateDifference) return dateDifference;
+    const leftCreatedAt = Date.parse(left.createdAt || "") || 0;
+    const rightCreatedAt = Date.parse(right.createdAt || "") || 0;
+    return rightCreatedAt - leftCreatedAt;
+  });
+}
+
+async function handleReceiptImage(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+
+  if (!file.type.startsWith("image/")) {
+    setReceiptScanStatus("请选择图片格式的支付截图。", "error");
+    event.target.value = "";
+    return;
+  }
+
+  if (!window.Tesseract) {
+    setReceiptScanStatus("识别组件加载失败，请联网刷新页面后重试。", "error");
+    event.target.value = "";
+    return;
+  }
+
+  const uploadLabel = receiptImageInput.closest(".receipt-upload");
+  uploadLabel.classList.add("is-busy");
+  receiptImageInput.disabled = true;
+  receiptUploadText.textContent = "正在识别…";
+  setReceiptScanStatus("正在读取截图，首次使用需要加载中文识别模型。");
+
+  try {
+    const result = await window.Tesseract.recognize(file, "chi_sim+eng", {
+      logger(message) {
+        if (message.status !== "recognizing text") return;
+        const progress = Math.max(1, Math.round((message.progress || 0) * 100));
+        setReceiptScanStatus(`正在识别截图文字 ${progress}%`);
+      }
+    });
+    const parsed = parseReceiptText(result.data.text || "");
+    applyReceiptResult(parsed);
+  } catch (error) {
+    console.error("Receipt OCR failed", error);
+    setReceiptScanStatus("没有成功识别这张截图，请换一张更清晰、包含金额和时间的原图。", "error");
+  } finally {
+    uploadLabel.classList.remove("is-busy");
+    receiptImageInput.disabled = false;
+    receiptUploadText.textContent = "重新选择截图";
+    event.target.value = "";
+  }
+}
+
+function parseReceiptText(rawText) {
+  const text = String(rawText || "")
+    .replace(/[，]/g, ",")
+    .replace(/[：]/g, ":")
+    .replace(/[￥]/g, "¥");
+  const compactText = text.replace(/\s+/g, " ");
+  const type = inferReceiptType(compactText);
+  const amount = inferReceiptAmount(text);
+  const date = inferReceiptDate(compactText);
+  const category = inferReceiptCategory(compactText, type);
+  const note = inferReceiptNote(text, category);
+  return { type, amount, date, ...category, note };
+}
+
+function inferReceiptType(text) {
+  const incomeKeywords = ["收款成功", "已收款", "收入", "到账", "转入", "退款成功", "退款到账", "对方向你转账"];
+  return incomeKeywords.some((keyword) => text.includes(keyword)) ? "income" : "expense";
+}
+
+function inferReceiptAmount(text) {
+  const priorityPatterns = [
+    /(?:实付|支付金额|付款金额|订单金额|交易金额|合计|金额|收款)[^\d¥￥]{0,10}[¥￥]?\s*([0-9]+(?:[.,][0-9]{1,2})?)/gi,
+    /[¥￥]\s*([0-9]+(?:[.,][0-9]{1,2})?)/g
+  ];
+  for (const pattern of priorityPatterns) {
+    const matches = [...text.matchAll(pattern)]
+      .map((match) => Number.parseFloat(match[1].replace(",", ".")))
+      .filter((value) => Number.isFinite(value) && value > 0 && value < 10000000);
+    if (matches.length) return Math.max(...matches);
+  }
+  return null;
+}
+
+function inferReceiptDate(text) {
+  const fullDateMatch = text.match(/(20\d{2})\s*[年./-]\s*(\d{1,2})\s*[月./-]\s*(\d{1,2})\s*日?/);
+  if (fullDateMatch) return toValidDate(fullDateMatch[1], fullDateMatch[2], fullDateMatch[3]);
+
+  const shortDateMatch = text.match(/(?:交易时间|支付时间|创建时间|付款时间|日期)?[^\d]{0,6}(\d{1,2})\s*[月./-]\s*(\d{1,2})\s*日?/);
+  if (!shortDateMatch) return "";
+  const currentYear = Number(getShanghaiDay().slice(0, 4));
+  let candidate = toValidDate(currentYear, shortDateMatch[1], shortDateMatch[2]);
+  if (candidate && candidate > getShanghaiDay()) {
+    candidate = toValidDate(currentYear - 1, shortDateMatch[1], shortDateMatch[2]);
+  }
+  return candidate;
+}
+
+function toValidDate(year, month, day) {
+  const value = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const parsed = new Date(`${value}T12:00:00+08:00`);
+  return Number.isNaN(parsed.getTime()) || getShanghaiDay(parsed) !== value ? "" : value;
+}
+
+function inferReceiptCategory(text, type) {
+  const rules =
+    type === "income"
+      ? [
+          { words: ["工资", "薪资", "薪酬"], major: "工资", minor: "工资" },
+          { words: ["奖金", "年终奖"], major: "工资", minor: "奖金" },
+          { words: ["补贴", "津贴"], major: "工资", minor: "补贴" },
+          { words: ["利息"], major: "理财", minor: "利息" },
+          { words: ["基金", "股票", "证券"], major: "理财", minor: "基金股票" },
+          { words: ["分红"], major: "理财", minor: "分红" },
+          { words: ["报销", "交通费"], major: "报销", minor: "其他报销" },
+          { words: ["退款", "退回"], major: "其他", minor: "退款" },
+          { words: ["转账", "收款"], major: "其他", minor: "转账" }
+        ]
+      : [
+          { words: ["地铁", "公交", "轨道交通"], major: "交通", minor: "地铁公交" },
+          { words: ["滴滴", "打车", "出租车", "网约车"], major: "交通", minor: "打车" },
+          { words: ["加油", "充电站", "充电桩"], major: "交通", minor: "加油充电" },
+          { words: ["停车"], major: "交通", minor: "停车" },
+          { words: ["铁路", "高铁", "机票", "航空"], major: "交通", minor: "高铁机票" },
+          { words: ["咖啡", "奶茶", "瑞幸", "星巴克", "茶百道", "霸王茶姬"], major: "餐饮", minor: "咖啡奶茶" },
+          { words: ["早餐", "包子", "豆浆"], major: "餐饮", minor: "早餐" },
+          { words: ["午餐", "午饭"], major: "餐饮", minor: "午餐" },
+          { words: ["晚餐", "晚饭", "夜宵"], major: "餐饮", minor: "晚餐" },
+          { words: ["超市", "买菜", "生鲜", "菜场"], major: "餐饮", minor: "买菜" },
+          { words: ["水果", "零食"], major: "餐饮", minor: "水果零食" },
+          { words: ["餐饮", "美团外卖", "饿了么", "饭店", "餐厅", "小吃"], major: "餐饮", minor: "午餐" },
+          { words: ["房租", "房贷"], major: "居家", minor: "房租房贷" },
+          { words: ["水费", "电费", "燃气"], major: "居家", minor: "水电燃气" },
+          { words: ["话费", "中国移动", "中国联通", "中国电信"], major: "居家", minor: "话费" },
+          { words: ["医院", "诊所", "挂号"], major: "医疗", minor: "挂号" },
+          { words: ["药房", "药店", "医药"], major: "医疗", minor: "药品" },
+          { words: ["电影", "影院", "演出"], major: "娱乐", minor: "电影演出" },
+          { words: ["酒店", "旅行", "景区"], major: "娱乐", minor: "旅行" },
+          { words: ["淘宝", "天猫", "京东", "拼多多", "购物"], major: "购物", minor: "日用品" },
+          { words: ["红包"], major: "人情", minor: "红包" }
+        ];
+  const matchedRule = rules.find((rule) => rule.words.some((word) => text.includes(word)));
+  return matchedRule || { major: "其他", minor: type === "income" ? "未分类" : "未分类" };
+}
+
+function inferReceiptNote(text, category) {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const labeledLine = lines.find((line) => /(?:收款方|商户|交易对方|付款给|商品说明|订单名称|商品)/.test(line));
+  if (labeledLine) {
+    const note = labeledLine.replace(/^.*?(?:收款方|商户|交易对方|付款给|商品说明|订单名称|商品)\s*[:：]?\s*/, "").trim();
+    if (note) return note.slice(0, 60);
+  }
+  const ignored = /(?:支付成功|交易成功|付款成功|账单详情|订单详情|支付金额|付款金额|交易金额|实付|¥|￥|\d{1,4}[年./-]\d{1,2})/;
+  const candidate = lines.find((line) => line.length >= 2 && line.length <= 40 && !ignored.test(line));
+  return (candidate || `${category.major}/${category.minor}（截图识别）`).slice(0, 60);
+}
+
+function applyReceiptResult(result) {
+  setActiveType(result.type);
+  if (result.amount) amountInput.value = result.amount.toFixed(2);
+  if (result.date) entryDateInput.value = result.date;
+  if (categoryMap[result.type]?.[result.major]) {
+    majorSelect.value = result.major;
+    fillMinorCategories();
+    if (categoryMap[result.type][result.major].includes(result.minor)) {
+      minorSelect.value = result.minor;
+    }
+  }
+  if (result.note) noteInput.value = result.note;
+
+  const filled = [
+    result.amount ? `金额 ${money(result.amount)}` : "",
+    result.date ? formatDay(result.date) : "",
+    result.type === "income" ? "收入" : "支出",
+    `${displayCategory(result.major)} / ${displayMinor(result.minor)}`
+  ].filter(Boolean);
+  const missingAmountHint = result.amount ? "" : "；未找到金额，请手动填写";
+  setReceiptScanStatus(`已填入：${filled.join(" · ")}${missingAmountHint}。请核对后再保存。`, result.amount ? "success" : "error");
+  amountInput.focus();
 }
 
 function renderRecordList(listNode, items, options = {}) {

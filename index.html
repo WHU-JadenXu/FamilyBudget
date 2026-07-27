@@ -66,6 +66,18 @@
             <button class="segment" data-type="income" type="button">收入</button>
           </div>
 
+          <section class="receipt-scan" aria-labelledby="receiptScanTitle">
+            <div class="receipt-scan-copy">
+              <strong id="receiptScanTitle">支付截图智能填单</strong>
+              <span>识别金额、收支、日期和分类，结果会先填入表单供你确认。图片只在当前浏览器中处理。</span>
+            </div>
+            <label class="receipt-upload">
+              <span id="receiptUploadText">选择支付截图</span>
+              <input id="receiptImageInput" type="file" accept="image/*" />
+            </label>
+            <div id="receiptScanStatus" class="receipt-scan-status" role="status" aria-live="polite"></div>
+          </section>
+
           <form id="entryForm" class="entry-form">
             <label>
               <span>记账人</span>
@@ -146,6 +158,14 @@
                 <option value="all">全部</option>
                 <option value="李逍宇">👦 李逍宇</option>
                 <option value="徐佳丹">👧 徐佳丹</option>
+              </select>
+            </label>
+            <label>
+              <span>收支类型</span>
+              <select id="filterType" aria-label="筛选收支类型">
+                <option value="all">全部收支</option>
+                <option value="expense">支出</option>
+                <option value="income">收入</option>
               </select>
             </label>
             <label>
@@ -235,6 +255,7 @@
 
     <script src="./config.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

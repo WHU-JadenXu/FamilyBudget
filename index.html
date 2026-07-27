@@ -69,13 +69,23 @@
           <section class="receipt-scan" aria-labelledby="receiptScanTitle">
             <div class="receipt-scan-copy">
               <strong id="receiptScanTitle">支付截图智能填单</strong>
-              <span>手机端会先压缩图片，再识别金额、收支、日期和分类。结果会先填入表单供你确认，图片不会上传。</span>
             </div>
             <label class="receipt-upload">
-              <span id="receiptUploadText">选择支付截图</span>
-              <input id="receiptImageInput" type="file" accept="image/*" />
+              <span id="receiptUploadText">选择一张或多张截图</span>
+              <input id="receiptImageInput" type="file" accept="image/*" multiple />
             </label>
             <div id="receiptScanStatus" class="receipt-scan-status" role="status" aria-live="polite"></div>
+            <section id="receiptBatchPanel" class="receipt-batch" aria-labelledby="receiptBatchTitle" hidden>
+              <div class="receipt-batch-head">
+                <strong id="receiptBatchTitle">识别到多条流水</strong>
+                <span>请取消勾选不需要的记录，再批量加入账本。</span>
+              </div>
+              <div id="receiptBatchList" class="receipt-batch-list"></div>
+              <div class="receipt-batch-actions">
+                <button id="receiptBatchAddBtn" class="primary-action" type="button">加入选中记录</button>
+                <button id="receiptBatchCancelBtn" class="secondary-action" type="button">取消</button>
+              </div>
+            </section>
           </section>
 
           <form id="entryForm" class="entry-form">
@@ -256,6 +266,6 @@
     <script src="./config.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
-    <script src="./app.js?v=20260727-ocr-fix-1"></script>
+    <script src="./app.js?v=20260727-multi-upload-1"></script>
   </body>
 </html>

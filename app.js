@@ -143,6 +143,11 @@ const searchInput = document.querySelector("#searchInput");
 const receiptImageInput = document.querySelector("#receiptImageInput");
 const receiptUploadText = document.querySelector("#receiptUploadText");
 const receiptScanStatus = document.querySelector("#receiptScanStatus");
+const receiptBatchPanel = document.querySelector("#receiptBatchPanel");
+const receiptBatchTitle = document.querySelector("#receiptBatchTitle");
+const receiptBatchList = document.querySelector("#receiptBatchList");
+const receiptBatchAddBtn = document.querySelector("#receiptBatchAddBtn");
+const receiptBatchCancelBtn = document.querySelector("#receiptBatchCancelBtn");
 const cloudStatus = document.querySelector("#cloudStatus");
 const cloudHint = document.querySelector("#cloudHint");
 const loginForm = document.querySelector("#loginForm");
@@ -170,6 +175,7 @@ let receiptOcrWorker = null;
 let receiptOcrWorkerPromise = null;
 let receiptOcrWorkerAttempt = 0;
 let receiptOcrIdleTimer = null;
+let pendingReceiptRecords = [];
 
 document.querySelectorAll(".segment").forEach((button) => {
   button.addEventListener("click", () => {
@@ -204,6 +210,9 @@ bottomTabs.forEach((button) => {
   button.addEventListener("click", () => switchPage(button.dataset.targetPage));
 });
 receiptImageInput.addEventListener("change", handleReceiptImage);
+receiptBatchList.addEventListener("change", updateReceiptBatchButton);
+receiptBatchAddBtn.addEventListener("click", importSelectedReceiptRecords);
+receiptBatchCancelBtn.addEventListener("click", clearReceiptBatch);
 window.addEventListener("pagehide", () => {
   if (receiptOcrWorker) receiptOcrWorker.terminate().catch(() => {});
 });
@@ -680,11 +689,12 @@ function setReceiptScanStatus(message, state = "") {
 }
 
 async function handleReceiptImage(event) {
-  const file = event.target.files?.[0];
-  if (!file) return;
+  const sourceFiles = [...(event.target.files || [])];
+  if (!sourceFiles.length) return;
+  clearReceiptBatch();
 
-  if (!file.type.startsWith("image/")) {
-    setReceiptScanStatus("请选择图片格式的支付截图。", "error");
+  if (sourceFiles.length > 10) {
+    setReceiptScanStatus("为避免手机内存不足，每次最多选择 10 张截图。", "error");
     event.target.value = "";
     return;
   }
@@ -695,8 +705,10 @@ async function handleReceiptImage(event) {
     return;
   }
 
-  if (file.size > 25 * 1024 * 1024) {
-    setReceiptScanStatus("图片超过 25 MB，请先在手机相册中裁剪后再试。", "error");
+  const files = sourceFiles.filter((file) => file.type.startsWith("image/") && file.size <= 25 * 1024 * 1024);
+  const invalidFileCount = sourceFiles.length - files.length;
+  if (!files.length) {
+    setReceiptScanStatus("没有可处理的图片。单张截图需小于 25 MB。", "error");
     event.target.value = "";
     return;
   }
@@ -705,19 +717,50 @@ async function handleReceiptImage(event) {
   uploadLabel.classList.add("is-busy");
   receiptImageInput.disabled = true;
   receiptUploadText.textContent = "正在识别…";
-  setReceiptScanStatus("正在为手机压缩截图…");
+  setReceiptScanStatus(`准备按顺序处理 ${files.length} 张截图…`);
 
   try {
-    const preparedImage = await withReceiptTimeout(prepareReceiptImage(file), 15000, "IMAGE_TIMEOUT");
-    setReceiptScanStatus(
-      preparedImage.wasResized
-        ? `图片已压缩至 ${preparedImage.width} × ${preparedImage.height}，正在加载识别模型…`
-        : "图片尺寸适合手机，正在加载识别模型…"
-    );
-    const worker = await withReceiptTimeout(getReceiptOcrWorker(), 90000, "MODEL_TIMEOUT");
-    const result = await withReceiptTimeout(worker.recognize(preparedImage.blob), 45000, "OCR_TIMEOUT");
-    const parsed = parseReceiptText(result.data.text || "");
-    applyReceiptResult(parsed);
+    const recognizedRecords = [];
+    let skippedCount = 0;
+    let unreadableCount = invalidFileCount;
+
+    for (let index = 0; index < files.length; index += 1) {
+      let preparedImage = null;
+      try {
+        setReceiptScanStatus(`正在处理第 ${index + 1}/${files.length} 张：压缩图片…`);
+        preparedImage = await withReceiptTimeout(prepareReceiptImage(files[index]), 15000, "IMAGE_TIMEOUT");
+        setReceiptScanStatus(`正在处理第 ${index + 1}/${files.length} 张：识别文字…`);
+        const worker = await withReceiptTimeout(getReceiptOcrWorker(), 90000, "MODEL_TIMEOUT");
+        let result = await withReceiptTimeout(worker.recognize(preparedImage.blob), 45000, "OCR_TIMEOUT");
+        const recognizedText = result.data.text || "";
+        result = null;
+        const batchResult = extractBatchReceiptRecords(recognizedText);
+        skippedCount += batchResult.skippedCount;
+        if (batchResult.records.length) {
+          recognizedRecords.push(...batchResult.records);
+        } else {
+          const parsed = parseReceiptText(recognizedText);
+          if (parsed.amount) recognizedRecords.push(parsed);
+          else unreadableCount += 1;
+        }
+      } catch (error) {
+        console.error(`Receipt OCR failed for image ${index + 1}`, error);
+        if (error?.code === "MODEL_TIMEOUT") throw error;
+        if (error?.code === "OCR_TIMEOUT") await resetReceiptOcrWorker();
+        unreadableCount += 1;
+      } finally {
+        preparedImage = null;
+      }
+    }
+
+    const uniqueRecords = recognizedRecords;
+    if (!uniqueRecords.length) {
+      setReceiptScanStatus("这些截图中没有识别到可用金额，请换更清晰的原图后重试。", "error");
+    } else if (files.length === 1 && uniqueRecords.length === 1 && !unreadableCount && !skippedCount) {
+      applyReceiptResult(uniqueRecords[0]);
+    } else {
+      applyReceiptBatchResult({ records: uniqueRecords, skippedCount, unreadableCount });
+    }
     scheduleReceiptWorkerRelease();
   } catch (error) {
     console.error("Receipt OCR failed", error);
@@ -728,7 +771,7 @@ async function handleReceiptImage(event) {
   } finally {
     uploadLabel.classList.remove("is-busy");
     receiptImageInput.disabled = false;
-    receiptUploadText.textContent = "重新选择截图";
+    receiptUploadText.textContent = "重新选择截图（可多选）";
     event.target.value = "";
   }
 }
@@ -810,9 +853,11 @@ async function getReceiptOcrWorker() {
       await worker.terminate();
       throw new Error("OCR_CANCELLED");
     }
+    const autoPageSegmentation = String(window.Tesseract.PSM?.AUTO ?? 3);
     await worker.setParameters({
       preserve_interword_spaces: "1",
-      user_defined_dpi: "150"
+      user_defined_dpi: "150",
+      tessedit_pageseg_mode: autoPageSegmentation
     });
     receiptOcrWorker = worker;
     return worker;
@@ -903,16 +948,23 @@ function inferReceiptType(text) {
 
 function inferReceiptAmount(text) {
   const priorityPatterns = [
-    /(?:实付|支付金额|付款金额|订单金额|交易金额|合计|金额|收款)[^\d¥￥]{0,10}[¥￥]?\s*([0-9]+(?:[.,][0-9]{1,2})?)/gi,
-    /[¥￥]\s*([0-9]+(?:[.,][0-9]{1,2})?)/g
+    /(?:实付|支付金额|付款金额|订单金额|交易金额|合计|金额|收款)[^\d¥￥]{0,10}[¥￥]?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/gi,
+    /[¥￥]\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/g,
+    /[-−–—﹣－]\s*[¥￥]?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/g
   ];
   for (const pattern of priorityPatterns) {
     const matches = [...text.matchAll(pattern)]
-      .map((match) => Number.parseFloat(match[1].replace(",", ".")))
+      .map((match) => parseOcrAmountToken(match[1]))
       .filter((value) => Number.isFinite(value) && value > 0 && value < 10000000);
     if (matches.length) return Math.max(...matches);
   }
   return null;
+}
+
+function parseOcrAmountToken(value) {
+  const token = String(value || "").replace(/\s+/g, "");
+  if (/^\d+,\d{1,2}$/.test(token)) return Number.parseFloat(token.replace(",", "."));
+  return Number.parseFloat(token.replaceAll(",", ""));
 }
 
 function inferReceiptDate(text) {
@@ -935,6 +987,106 @@ function toValidDate(year, month, day) {
   return Number.isNaN(parsed.getTime()) || getShanghaiDay(parsed) !== value ? "" : value;
 }
 
+function extractBatchReceiptRecords(rawText) {
+  const lines = String(rawText || "")
+    .replace(/[，]/g, ",")
+    .replace(/[：]/g, ":")
+    .replace(/[￥]/g, "¥")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const signedAmountPattern = /([+＋\-−–—﹣－])\s*[¥￥]?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/g;
+  const candidates = [];
+
+  lines.forEach((line, lineIndex) => {
+    for (const match of line.matchAll(signedAmountPattern)) {
+      const amount = parseOcrAmountToken(match[2]);
+      if (!Number.isFinite(amount) || amount <= 0 || amount >= 10000000) continue;
+      candidates.push({
+        amount,
+        line,
+        lineIndex,
+        matchIndex: match.index || 0,
+        type: ["+", "＋"].includes(match[1]) ? "income" : "expense"
+      });
+    }
+  });
+
+  let skippedCount = 0;
+  const records = candidates.flatMap((candidate, candidateIndex) => {
+    const nextLineIndex = candidates[candidateIndex + 1]?.lineIndex ?? lines.length;
+    const contextLines = lines.slice(Math.max(0, candidate.lineIndex - 1), Math.max(candidate.lineIndex + 1, nextLineIndex));
+    const context = contextLines.join(" ");
+    if (/(?:等待付款|待付款|待支付|未支付|交易关闭|已关闭|已取消)/.test(context)) {
+      skippedCount += 1;
+      return [];
+    }
+
+    const note = findBatchMerchant(lines, candidate);
+    const category = inferReceiptCategory(`${note} ${context}`, candidate.type);
+    const date = inferBatchReceiptDate(context);
+    return [
+      {
+        type: candidate.type,
+        amount: candidate.amount,
+        date,
+        major: category.major,
+        minor: category.minor,
+        note: note || `${category.major}/${category.minor}（流水截图识别）`
+      }
+    ];
+  });
+
+  const uniqueRecords = records.filter(
+    (record, index, items) =>
+      items.findIndex(
+        (item) => item.type === record.type && item.amount === record.amount && item.date === record.date && item.note === record.note
+      ) === index
+  );
+  return { records: uniqueRecords, skippedCount };
+}
+
+function findBatchMerchant(lines, candidate) {
+  const sameLineText = cleanBatchMerchant(candidate.line.slice(0, candidate.matchIndex));
+  if (isBatchMerchantCandidate(sameLineText)) return sameLineText;
+
+  for (let offset = 1; offset <= 3; offset += 1) {
+    const previousLine = cleanBatchMerchant(lines[candidate.lineIndex - offset] || "");
+    if (isBatchMerchantCandidate(previousLine)) return previousLine;
+  }
+  return "";
+}
+
+function cleanBatchMerchant(value) {
+  return String(value || "")
+    .replace(/^[\s·•|丨]+/, "")
+    .replace(/^(?:闪购|天猫|淘宝)\s*/, (prefix) => prefix.trim())
+    .replace(/[.…·\s]+$/, "")
+    .trim()
+    .slice(0, 60);
+}
+
+function isBatchMerchantCandidate(value) {
+  if (!value || value.length < 2) return false;
+  if (/^(?:全部|支出|收入|转账|退款|订单|筛选|搜索|搜索交易记录|收支分析)$/.test(value)) return false;
+  if (/^(?:餐饮美食|日用百货|交通出行|服饰装扮|医疗健康|今天|昨天|\d{1,2}月)/.test(value)) return false;
+  if (/^(?:¥|￥)?[\d,.\s]+(?:元)?$/.test(value)) return false;
+  return true;
+}
+
+function inferBatchReceiptDate(context) {
+  const fullDate = inferReceiptDate(context);
+  if (fullDate) return fullDate;
+  if (context.includes("昨天")) return shiftShanghaiDay(getShanghaiDay(), -1);
+  return getShanghaiDay();
+}
+
+function shiftShanghaiDay(dayValue, offset) {
+  const date = new Date(`${dayValue}T12:00:00+08:00`);
+  date.setUTCDate(date.getUTCDate() + offset);
+  return getShanghaiDay(date);
+}
+
 function inferReceiptCategory(text, type) {
   const rules =
     type === "income"
@@ -955,11 +1107,11 @@ function inferReceiptCategory(text, type) {
           { words: ["加油", "充电站", "充电桩"], major: "交通", minor: "加油充电" },
           { words: ["停车"], major: "交通", minor: "停车" },
           { words: ["铁路", "高铁", "机票", "航空"], major: "交通", minor: "高铁机票" },
-          { words: ["咖啡", "奶茶", "瑞幸", "星巴克", "茶百道", "霸王茶姬"], major: "餐饮", minor: "咖啡奶茶" },
+          { words: ["咖啡", "奶茶", "茶饮", "瑞幸", "星巴克", "茶百道", "霸王茶姬", "喜茶"], major: "餐饮", minor: "咖啡奶茶" },
           { words: ["早餐", "包子", "豆浆"], major: "餐饮", minor: "早餐" },
           { words: ["午餐", "午饭"], major: "餐饮", minor: "午餐" },
           { words: ["晚餐", "晚饭", "夜宵"], major: "餐饮", minor: "晚餐" },
-          { words: ["超市", "买菜", "生鲜", "菜场"], major: "餐饮", minor: "买菜" },
+          { words: ["超市", "买菜", "生鲜", "菜场", "盒马"], major: "餐饮", minor: "买菜" },
           { words: ["水果", "零食"], major: "餐饮", minor: "水果零食" },
           { words: ["餐饮", "美团外卖", "饿了么", "饭店", "餐厅", "小吃"], major: "餐饮", minor: "午餐" },
           { words: ["房租", "房贷"], major: "居家", minor: "房租房贷" },
@@ -969,7 +1121,7 @@ function inferReceiptCategory(text, type) {
           { words: ["药房", "药店", "医药"], major: "医疗", minor: "药品" },
           { words: ["电影", "影院", "演出"], major: "娱乐", minor: "电影演出" },
           { words: ["酒店", "旅行", "景区"], major: "娱乐", minor: "旅行" },
-          { words: ["淘宝", "天猫", "京东", "拼多多", "购物"], major: "购物", minor: "日用品" },
+          { words: ["淘宝", "天猫", "京东", "拼多多", "购物", "无印良品", "MUJI", "日用百货"], major: "购物", minor: "日用品" },
           { words: ["红包"], major: "人情", minor: "红包" }
         ];
   const matchedRule = rules.find((rule) => rule.words.some((word) => text.includes(word)));
@@ -992,6 +1144,7 @@ function inferReceiptNote(text, category) {
 }
 
 function applyReceiptResult(result) {
+  clearReceiptBatch();
   setActiveType(result.type);
   if (result.amount) amountInput.value = result.amount.toFixed(2);
   if (result.date) entryDateInput.value = result.date;
@@ -1013,6 +1166,85 @@ function applyReceiptResult(result) {
   const missingAmountHint = result.amount ? "" : "；未找到金额，请手动填写";
   setReceiptScanStatus(`已填入：${filled.join(" · ")}${missingAmountHint}。请核对后再保存。`, result.amount ? "success" : "error");
   amountInput.focus();
+}
+
+function applyReceiptBatchResult(result) {
+  pendingReceiptRecords = result.records;
+  receiptBatchPanel.hidden = false;
+  receiptBatchTitle.textContent = `识别到 ${pendingReceiptRecords.length} 条可导入流水`;
+  receiptBatchList.innerHTML = pendingReceiptRecords
+    .map(
+      (record, index) => `
+        <label class="receipt-batch-item">
+          <input type="checkbox" data-batch-index="${index}" checked />
+          <span class="receipt-batch-copy">
+            <strong>${escapeHtml(record.note)}</strong>
+            <span>${escapeHtml(formatDay(record.date))} · ${record.type === "income" ? "收入" : "支出"} · ${escapeHtml(
+              `${displayCategory(record.major)} / ${displayMinor(record.minor)}`
+            )}</span>
+          </span>
+          <strong class="receipt-batch-money ${record.type === "income" ? "income" : ""}">
+            ${record.type === "income" ? "+" : "-"}${escapeHtml(money(record.amount))}
+          </strong>
+        </label>
+      `
+    )
+    .join("");
+  updateReceiptBatchButton();
+  const skippedHint = result.skippedCount ? `，另有 ${result.skippedCount} 条未付款或已关闭记录已跳过` : "";
+  const unreadableHint = result.unreadableCount ? `，${result.unreadableCount} 张未识别或格式不符合要求` : "";
+  setReceiptScanStatus(
+    `已识别 ${pendingReceiptRecords.length} 条流水${skippedHint}${unreadableHint}。请核对勾选项后批量加入账本。`,
+    "success"
+  );
+}
+
+function updateReceiptBatchButton() {
+  const selectedCount = receiptBatchList.querySelectorAll("[data-batch-index]:checked").length;
+  receiptBatchAddBtn.disabled = selectedCount === 0;
+  receiptBatchAddBtn.textContent = selectedCount ? `加入选中的 ${selectedCount} 条` : "请至少选择一条";
+}
+
+function clearReceiptBatch() {
+  pendingReceiptRecords = [];
+  receiptBatchList.innerHTML = "";
+  receiptBatchPanel.hidden = true;
+  receiptBatchAddBtn.disabled = false;
+  receiptBatchAddBtn.textContent = "加入选中记录";
+}
+
+async function importSelectedReceiptRecords() {
+  const selectedIndexes = [...receiptBatchList.querySelectorAll("[data-batch-index]:checked")].map((input) =>
+    Number(input.dataset.batchIndex)
+  );
+  const selectedItems = selectedIndexes.map((index) => pendingReceiptRecords[index]).filter(Boolean);
+  if (!selectedItems.length) {
+    setReceiptScanStatus("请至少勾选一条流水。", "error");
+    return;
+  }
+
+  receiptBatchAddBtn.disabled = true;
+  const baseTime = Date.now();
+  const importedRecords = selectedItems.map((item, index) => ({
+    id: crypto.randomUUID ? crypto.randomUUID() : `${baseTime}-${index}-${Math.random()}`,
+    type: item.type,
+    person: personSelect.value,
+    amount: Math.round(item.amount * 100) / 100,
+    benefit: item.type === "expense" ? benefitSelect.value || `${personSelect.value}用` : "",
+    major: item.major,
+    minor: item.minor,
+    note: item.note,
+    date: item.date || getShanghaiDay(),
+    createdAt: new Date(baseTime + index).toISOString(),
+    createdBy: currentUser?.id || ""
+  }));
+
+  records = [...importedRecords, ...records];
+  saveRecords();
+  render();
+  clearReceiptBatch();
+  setReceiptScanStatus(`已将 ${importedRecords.length} 条流水加入账本。`, "success");
+  if (isCloudReady) await uploadMissingLocalRecords();
 }
 
 function renderRecordList(listNode, items, options = {}) {

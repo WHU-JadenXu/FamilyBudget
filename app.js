@@ -790,7 +790,7 @@ async function handleReceiptImage(event) {
   } finally {
     uploadLabel.classList.remove("is-busy");
     receiptImageInput.disabled = false;
-    receiptUploadText.textContent = "重新选择截图（可多选）";
+    receiptUploadText.textContent = "选择截图";
     event.target.value = "";
   }
 }

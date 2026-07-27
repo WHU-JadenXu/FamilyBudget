@@ -69,7 +69,7 @@
           <section class="receipt-scan" aria-labelledby="receiptScanTitle">
             <div class="receipt-scan-copy">
               <strong id="receiptScanTitle">支付截图智能填单</strong>
-              <span>识别金额、收支、日期和分类，结果会先填入表单供你确认。图片只在当前浏览器中处理。</span>
+              <span>手机端会先压缩图片，再识别金额、收支、日期和分类。结果会先填入表单供你确认，图片不会上传。</span>
             </div>
             <label class="receipt-upload">
               <span id="receiptUploadText">选择支付截图</span>
@@ -255,7 +255,7 @@
 
     <script src="./config.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

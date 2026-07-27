@@ -166,6 +166,10 @@ const pageNodes = document.querySelectorAll(".app-page");
 const bottomTabs = document.querySelectorAll(".bottom-tab");
 let calendarViewMonth = "";
 let activeCalendarTarget = "export";
+let receiptOcrWorker = null;
+let receiptOcrWorkerPromise = null;
+let receiptOcrWorkerAttempt = 0;
+let receiptOcrIdleTimer = null;
 
 document.querySelectorAll(".segment").forEach((button) => {
   button.addEventListener("click", () => {
@@ -200,6 +204,9 @@ bottomTabs.forEach((button) => {
   button.addEventListener("click", () => switchPage(button.dataset.targetPage));
 });
 receiptImageInput.addEventListener("change", handleReceiptImage);
+window.addEventListener("pagehide", () => {
+  if (receiptOcrWorker) receiptOcrWorker.terminate().catch(() => {});
+});
 
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -682,31 +689,191 @@ async function handleReceiptImage(event) {
     return;
   }
 
+  if (file.size > 25 * 1024 * 1024) {
+    setReceiptScanStatus("图片超过 25 MB，请先在手机相册中裁剪后再试。", "error");
+    event.target.value = "";
+    return;
+  }
+
   const uploadLabel = receiptImageInput.closest(".receipt-upload");
   uploadLabel.classList.add("is-busy");
   receiptImageInput.disabled = true;
   receiptUploadText.textContent = "正在识别…";
-  setReceiptScanStatus("正在读取截图，首次使用需要加载中文识别模型。");
+  setReceiptScanStatus("正在为手机压缩截图…");
 
   try {
-    const result = await window.Tesseract.recognize(file, "chi_sim+eng", {
-      logger(message) {
-        if (message.status !== "recognizing text") return;
-        const progress = Math.max(1, Math.round((message.progress || 0) * 100));
-        setReceiptScanStatus(`正在识别截图文字 ${progress}%`);
-      }
-    });
+    const preparedImage = await withReceiptTimeout(prepareReceiptImage(file), 15000, "IMAGE_TIMEOUT");
+    setReceiptScanStatus(
+      preparedImage.wasResized
+        ? `图片已压缩至 ${preparedImage.width} × ${preparedImage.height}，正在加载识别模型…`
+        : "图片尺寸适合手机，正在加载识别模型…"
+    );
+    const worker = await withReceiptTimeout(getReceiptOcrWorker(), 90000, "MODEL_TIMEOUT");
+    const result = await withReceiptTimeout(worker.recognize(preparedImage.blob), 45000, "OCR_TIMEOUT");
     const parsed = parseReceiptText(result.data.text || "");
     applyReceiptResult(parsed);
+    scheduleReceiptWorkerRelease();
   } catch (error) {
     console.error("Receipt OCR failed", error);
-    setReceiptScanStatus("没有成功识别这张截图，请换一张更清晰、包含金额和时间的原图。", "error");
+    if (["MODEL_TIMEOUT", "OCR_TIMEOUT"].includes(error?.code)) {
+      await resetReceiptOcrWorker();
+    }
+    setReceiptScanStatus(getReceiptErrorMessage(error), "error");
   } finally {
     uploadLabel.classList.remove("is-busy");
     receiptImageInput.disabled = false;
     receiptUploadText.textContent = "重新选择截图";
     event.target.value = "";
   }
+}
+
+async function prepareReceiptImage(file) {
+  const image = await decodeReceiptImage(file);
+  const sourceWidth = image.width || image.naturalWidth;
+  const sourceHeight = image.height || image.naturalHeight;
+  const maxEdge = 1800;
+  const maxPixels = 2400000;
+  const edgeScale = Math.min(1, maxEdge / Math.max(sourceWidth, sourceHeight));
+  const pixelScale = Math.min(1, Math.sqrt(maxPixels / (sourceWidth * sourceHeight)));
+  const scale = Math.min(edgeScale, pixelScale);
+  const width = Math.max(1, Math.round(sourceWidth * scale));
+  const height = Math.max(1, Math.round(sourceHeight * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { alpha: false });
+  if (!context) throw new Error("CANVAS_UNAVAILABLE");
+  context.fillStyle = "#fff";
+  context.fillRect(0, 0, width, height);
+  context.filter = "grayscale(1) contrast(1.15)";
+  context.drawImage(image, 0, 0, width, height);
+  if (typeof image.close === "function") image.close();
+
+  const blob = await new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (result) => (result ? resolve(result) : reject(new Error("IMAGE_COMPRESS_FAILED"))),
+      "image/jpeg",
+      0.9
+    );
+  });
+  canvas.width = 1;
+  canvas.height = 1;
+  return { blob, width, height, wasResized: scale < 0.99 };
+}
+
+async function decodeReceiptImage(file) {
+  if (window.createImageBitmap) {
+    try {
+      return await window.createImageBitmap(file, { imageOrientation: "from-image" });
+    } catch {
+      // Older mobile browsers may not accept imageOrientation; use the Image fallback.
+    }
+  }
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const url = URL.createObjectURL(file);
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("IMAGE_DECODE_FAILED"));
+    };
+    image.src = url;
+  });
+}
+
+async function getReceiptOcrWorker() {
+  if (receiptOcrWorker) return receiptOcrWorker;
+  if (receiptOcrWorkerPromise) return receiptOcrWorkerPromise;
+
+  const attempt = ++receiptOcrWorkerAttempt;
+  const lstmOnlyMode = window.Tesseract.OEM?.LSTM_ONLY ?? 1;
+  receiptOcrWorkerPromise = window.Tesseract.createWorker("chi_sim", lstmOnlyMode, {
+    langPath: "https://tessdata.projectnaptha.com/4.0.0_fast",
+    logger: updateReceiptOcrProgress,
+    errorHandler(error) {
+      console.error("Receipt OCR worker error", error);
+    }
+  });
+
+  try {
+    const worker = await receiptOcrWorkerPromise;
+    if (attempt !== receiptOcrWorkerAttempt) {
+      await worker.terminate();
+      throw new Error("OCR_CANCELLED");
+    }
+    await worker.setParameters({
+      preserve_interword_spaces: "1",
+      user_defined_dpi: "150"
+    });
+    receiptOcrWorker = worker;
+    return worker;
+  } finally {
+    if (attempt === receiptOcrWorkerAttempt) receiptOcrWorkerPromise = null;
+  }
+}
+
+function updateReceiptOcrProgress(message) {
+  const progress = Math.max(0, Math.round((message.progress || 0) * 100));
+  const statusLabels = {
+    "loading tesseract core": "正在启动手机识别引擎",
+    "initializing tesseract": "正在初始化识别引擎",
+    "loading language traineddata": "首次使用，正在下载精简中文模型",
+    "initializing api": "正在准备中文识别",
+    "recognizing text": "正在识别截图文字"
+  };
+  const label = statusLabels[message.status];
+  if (!label) return;
+  setReceiptScanStatus(progress ? `${label} ${progress}%` : `${label}…`);
+}
+
+function withReceiptTimeout(promise, timeoutMs, code) {
+  let timeoutId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = window.setTimeout(() => {
+      const error = new Error(code);
+      error.code = code;
+      reject(error);
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => window.clearTimeout(timeoutId));
+}
+
+function scheduleReceiptWorkerRelease() {
+  window.clearTimeout(receiptOcrIdleTimer);
+  receiptOcrIdleTimer = window.setTimeout(() => {
+    resetReceiptOcrWorker();
+  }, 120000);
+}
+
+async function resetReceiptOcrWorker() {
+  window.clearTimeout(receiptOcrIdleTimer);
+  receiptOcrIdleTimer = null;
+  receiptOcrWorkerAttempt += 1;
+  const worker = receiptOcrWorker;
+  receiptOcrWorker = null;
+  receiptOcrWorkerPromise = null;
+  if (worker) {
+    await worker.terminate().catch(() => {});
+  }
+}
+
+function getReceiptErrorMessage(error) {
+  if (error?.code === "MODEL_TIMEOUT") {
+    return "中文模型加载超过 90 秒，请切换网络或刷新页面后重试。识别任务已自动停止。";
+  }
+  if (error?.code === "OCR_TIMEOUT") {
+    return "手机识别超过 45 秒，任务已自动停止。请裁剪掉截图中无关区域后重试。";
+  }
+  if (error?.code === "IMAGE_TIMEOUT") {
+    return "手机处理图片超时，请在相册中裁剪截图或降低图片大小后重试。";
+  }
+  if (["IMAGE_DECODE_FAILED", "IMAGE_COMPRESS_FAILED", "CANVAS_UNAVAILABLE"].includes(error?.message)) {
+    return "这张图片无法在当前浏览器中处理，请换用 JPG 或 PNG 截图。";
+  }
+  return "没有成功识别这张截图，请检查网络，或换一张更清晰、包含金额和时间的截图。";
 }
 
 function parseReceiptText(rawText) {

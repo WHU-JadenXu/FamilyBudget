@@ -673,6 +673,12 @@ function sortRecordsBySpentDate(items) {
   });
 }
 
+function setReceiptScanStatus(message, state = "") {
+  receiptScanStatus.textContent = message;
+  receiptScanStatus.classList.toggle("success", state === "success");
+  receiptScanStatus.classList.toggle("error", state === "error");
+}
+
 async function handleReceiptImage(event) {
   const file = event.target.files?.[0];
   if (!file) return;

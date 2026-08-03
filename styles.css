@@ -613,12 +613,12 @@ select:focus {
   color: #fff;
 }
 
-.wide-action,
 .danger-action {
   width: 100%;
   min-height: 56px;
 }
 
+.excel-actions,
 .json-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -626,6 +626,7 @@ select:focus {
 }
 
 .toolbar > button,
+.excel-actions button,
 .json-actions button,
 .import-button {
   display: grid;
@@ -639,8 +640,17 @@ select:focus {
   text-align: center;
 }
 
+.excel-actions button {
+  min-height: 56px;
+}
+
 .danger-action {
   color: var(--danger) !important;
+}
+
+.range-danger-action {
+  border-style: dashed !important;
+  background: rgba(255, 255, 255, 0.58) !important;
 }
 
 .import-button input {
@@ -804,6 +814,10 @@ select:focus {
 
 .trip-page-heading {
   align-items: flex-end;
+}
+
+#tripStatusFilter {
+  width: 154px;
 }
 
 .trip-page-heading .eyebrow {
@@ -1191,6 +1205,7 @@ select:focus {
     grid-template-columns: 1fr;
   }
 
+  .excel-actions,
   .json-actions {
     grid-template-columns: 1fr;
   }

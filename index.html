@@ -10,19 +10,18 @@
     <title>家庭记账</title>
     <link rel="apple-touch-icon" href="./assets/miniapp-avatar-xl.png" />
     <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="stylesheet" href="./styles.css?v=20260803-business-trips-1" />
+    <link rel="stylesheet" href="./styles.css?v=20260803-business-trips-3" />
   </head>
   <body>
     <main class="app-shell">
       <section class="top-band">
         <div>
           <p class="eyebrow">👦 李逍宇 & 👧 徐佳丹</p>
-          <h1>家庭记账</h1>
         </div>
         <div class="month-chip" id="monthLabel"></div>
       </section>
 
-      <section class="summary-band" aria-label="本月概览">
+      <section id="monthlySummary" class="summary-band" aria-label="本月概览">
         <div class="summary-main">
           <span>本月支出</span>
           <strong id="monthExpense">¥0.00</strong>
@@ -278,6 +277,7 @@
           <div class="section-heading">
             <h2>项目列表</h2>
             <select id="tripStatusFilter" aria-label="筛选出差项目状态">
+              <option value="active" selected>进行中 / 待报销</option>
               <option value="all">全部状态</option>
               <option value="ongoing">进行中</option>
               <option value="pending">待报销</option>
@@ -376,7 +376,10 @@
               <div id="calendarGrid" class="calendar-grid"></div>
             </div>
           </div>
-          <button id="exportExcelBtn" class="wide-action" type="button">导出 Excel</button>
+          <div class="excel-actions">
+            <button id="exportExcelBtn" type="button">导出选定时间段</button>
+            <button id="exportAllExcelBtn" type="button">导出全部记录</button>
+          </div>
           <div class="json-actions">
             <button id="exportBtn" type="button">导出 JSON</button>
             <label class="import-button">
@@ -384,6 +387,7 @@
               <input id="importFile" type="file" accept="application/json" />
             </label>
           </div>
+          <button id="clearRangeBtn" class="danger-action range-danger-action" type="button">清空选定时间段数据</button>
           <button id="clearBtn" class="danger-action" type="button">清空全部数据</button>
         </section>
       </section>
@@ -414,6 +418,6 @@
     <script src="./config.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
-    <script src="./app.js?v=20260803-business-trips-1"></script>
+    <script src="./app.js?v=20260803-business-trips-3"></script>
   </body>
 </html>

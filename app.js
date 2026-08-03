@@ -174,6 +174,7 @@ const detailEndDateInput = document.querySelector("#detailEndDate");
 const clearDetailFiltersBtn = document.querySelector("#clearDetailFiltersBtn");
 const detailResultHint = document.querySelector("#detailResultHint");
 const searchInput = document.querySelector("#searchInput");
+const monthlySummary = document.querySelector("#monthlySummary");
 const receiptImageInput = document.querySelector("#receiptImageInput");
 const receiptUploadText = document.querySelector("#receiptUploadText");
 const receiptScanStatus = document.querySelector("#receiptScanStatus");
@@ -229,6 +230,10 @@ const tripReimbursedCount = document.querySelector("#tripReimbursedCount");
 const tripArchivedCount = document.querySelector("#tripArchivedCount");
 const exportStartDateInput = document.querySelector("#exportStartDate");
 const exportEndDateInput = document.querySelector("#exportEndDate");
+const exportExcelBtn = document.querySelector("#exportExcelBtn");
+const exportAllExcelBtn = document.querySelector("#exportAllExcelBtn");
+const clearRangeBtn = document.querySelector("#clearRangeBtn");
+const clearBtn = document.querySelector("#clearBtn");
 const dateRangeBtn = document.querySelector("#dateRangeBtn");
 const dateRangeText = document.querySelector("#dateRangeText");
 const calendarPanel = document.querySelector("#calendarPanel");
@@ -390,7 +395,8 @@ document.querySelector("#exportBtn").addEventListener("click", () => {
   downloadBlob(blob, `家庭记账-${getShanghaiDay()}.json`);
 });
 
-document.querySelector("#exportExcelBtn").addEventListener("click", exportExcelRecords);
+exportExcelBtn.addEventListener("click", () => exportExcelRecords());
+exportAllExcelBtn.addEventListener("click", () => exportExcelRecords({ allRecords: true }));
 
 document.querySelector("#importFile").addEventListener("change", async (event) => {
   const file = event.target.files[0];
@@ -421,7 +427,9 @@ document.querySelector("#importFile").addEventListener("change", async (event) =
   }
 });
 
-document.querySelector("#clearBtn").addEventListener("click", async () => {
+clearRangeBtn.addEventListener("click", clearSelectedRangeRecords);
+
+clearBtn.addEventListener("click", async () => {
   if (!records.length && !trips.length && !isCloudReady) return;
   const storageSize = getLedgerStorageSize();
   const sizeLabel = storageSize ? `\n当前本地数据约 ${formatBytes(storageSize)}。` : "";
@@ -579,23 +587,23 @@ function getCalendarContainer(target) {
   return target === "detail" ? detailDateRangeBtn.parentElement : dateRangeBtn.parentElement;
 }
 
-async function exportExcelRecords() {
-  const startDate = exportStartDateInput.value;
-  const endDate = exportEndDateInput.value;
+async function exportExcelRecords({ allRecords = false } = {}) {
+  const startDate = allRecords ? "" : exportStartDateInput.value;
+  const endDate = allRecords ? "" : exportEndDateInput.value;
 
-  if (!startDate || !endDate) {
+  if (!allRecords && (!startDate || !endDate)) {
     alert("请选择导出 Excel 的开始日期和结束日期。");
     return;
   }
 
-  if (startDate > endDate) {
+  if (!allRecords && startDate > endDate) {
     alert("开始日期不能晚于结束日期。");
     return;
   }
 
   const scopedRecords = await getRecordsForExport(startDate, endDate);
   if (!scopedRecords.length) {
-    alert("这个时间段内没有可导出的记录。");
+    alert(allRecords ? "还没有可导出的日常记录。" : "这个时间段内没有可导出的记录。");
     return;
   }
 
@@ -623,7 +631,7 @@ async function exportExcelRecords() {
   );
 
   const sheetHtml = buildExcelSheet({
-    title: `家庭记账 ${startDate} 至 ${endDate}`,
+    title: allRecords ? "家庭记账 全部记录" : `家庭记账 ${startDate} 至 ${endDate}`,
     headers: ["日期", "类型", "记账人", "金额", "花给谁", "大类", "小类", "备注", "创建时间"],
     rows,
     summaryRows: [
@@ -634,19 +642,19 @@ async function exportExcelRecords() {
 
   downloadBlob(
     new Blob([`\ufeff${sheetHtml}`], { type: "application/vnd.ms-excel;charset=utf-8" }),
-    `家庭记账-${startDate}-至-${endDate}.xls`
+    allRecords ? `家庭记账-全部记录-${getShanghaiDay()}.xls` : `家庭记账-${startDate}-至-${endDate}.xls`
   );
 }
 
-async function getRecordsForExport(startDate, endDate) {
+async function getRecordsForExport(startDate = "", endDate = "") {
   if (isCloudReady) {
-    const { data, error } = await supabaseClient
+    let query = supabaseClient
       .from("records")
       .select(cloudRecordFields)
-      .eq("family_id", familyId)
-      .gte("spent_on", startDate)
-      .lte("spent_on", endDate)
-      .order("spent_on", { ascending: true });
+      .eq("family_id", familyId);
+    if (startDate) query = query.gte("spent_on", startDate);
+    if (endDate) query = query.lte("spent_on", endDate);
+    const { data, error } = await query.order("spent_on", { ascending: true });
 
     if (!error) {
       return data.map(fromCloudRecord).filter(isRecord).filter(isDailyRecord);
@@ -656,6 +664,88 @@ async function getRecordsForExport(startDate, endDate) {
   }
 
   return records.filter(isDailyRecord).filter((record) => {
+    const day = getRecordDay(record);
+    return (!startDate || day >= startDate) && (!endDate || day <= endDate);
+  });
+}
+
+async function clearSelectedRangeRecords() {
+  const startDate = exportStartDateInput.value;
+  const endDate = exportEndDateInput.value;
+  if (!startDate || !endDate) {
+    alert("请先选择要清空的开始日期和结束日期。");
+    return;
+  }
+  if (startDate > endDate) {
+    alert("开始日期不能晚于结束日期。");
+    return;
+  }
+
+  const localScopedRecords = getClearableRangeRecords(records, startDate, endDate);
+  let cloudScopedRecords = [];
+  if (isCloudReady) {
+    const { data, error } = await supabaseClient
+      .from("records")
+      .select(cloudRecordFields)
+      .eq("family_id", familyId)
+      .is("trip_id", null)
+      .is("trip_role", null)
+      .gte("spent_on", startDate)
+      .lte("spent_on", endDate);
+    if (error) {
+      setCloudState("清空范围读取失败", formatCloudSchemaError(error));
+      alert("无法确认云端选定时间段的数据，已取消清空。");
+      return;
+    }
+    cloudScopedRecords = data.map(fromCloudRecord).filter(isRecord);
+  }
+
+  const scopedRecordIds = new Set([...localScopedRecords, ...cloudScopedRecords].map((record) => record.id));
+  if (!scopedRecordIds.size) {
+    alert("选定时间段内没有可清空的日常记录。出差费用、项目结算和出差项目不会被此功能删除。");
+    return;
+  }
+
+  const captcha = createCaptchaCode();
+  const syncLabel = isCloudReady
+    ? "本机及当前家庭云端账本中的同范围日常记录都会删除。"
+    : "当前仅删除本机中的同范围日常记录。";
+  const answer = prompt(
+    `确定清空 ${startDate} 至 ${endDate} 的数据吗？\n\n将删除 ${scopedRecordIds.size} 条日常记录。${syncLabel}\n出差费用、项目结算和出差项目不受影响。\n\n请输入验证码 ${captcha} 后继续：`
+  );
+  if (answer === null) return;
+  if (answer.trim().toLowerCase() !== captcha.toLowerCase()) {
+    alert("验证码不一致，已取消清空。");
+    return;
+  }
+
+  if (isCloudReady) {
+    const { error } = await supabaseClient
+      .from("records")
+      .delete()
+      .eq("family_id", familyId)
+      .is("trip_id", null)
+      .is("trip_role", null)
+      .gte("spent_on", startDate)
+      .lte("spent_on", endDate);
+    if (error) {
+      setCloudState("选定时间段清空失败", formatCloudSchemaError(error));
+      alert("云端数据清空失败，本机数据没有改动。");
+      return;
+    }
+  }
+
+  const localRecordIds = new Set(localScopedRecords.map((record) => record.id));
+  records = records.filter((record) => !localRecordIds.has(record.id));
+  saveRecords();
+  render();
+  updateAuthUi();
+  alert(`已清空 ${startDate} 至 ${endDate} 的 ${scopedRecordIds.size} 条日常记录。`);
+}
+
+function getClearableRangeRecords(recordItems, startDate, endDate) {
+  return recordItems.filter((record) => {
+    if (record.tripId || record.tripRole) return false;
     const day = getRecordDay(record);
     return day >= startDate && day <= endDate;
   });
@@ -678,6 +768,7 @@ function switchPage(pageName) {
   bottomTabs.forEach((button) => {
     button.classList.toggle("active", button.dataset.targetPage === pageName);
   });
+  monthlySummary.hidden = pageName === "trips";
 }
 
 function setActiveType(type) {
@@ -1037,10 +1128,11 @@ function renderTrips() {
   tripReimbursedCount.textContent = counts.reimbursed;
   tripArchivedCount.textContent = counts.archived;
 
-  const filterValue = tripStatusFilter.value || "all";
+  const filterValue = tripStatusFilter.value || "active";
   const visibleTrips = trips
     .filter((trip) => {
       if (trip.deletedAt) return false;
+      if (filterValue === "active") return !trip.archivedAt && ["ongoing", "pending"].includes(trip.status);
       if (filterValue === "all") return true;
       if (filterValue === "archived") return Boolean(trip.archivedAt);
       return !trip.archivedAt && trip.status === filterValue;
@@ -2820,6 +2912,7 @@ function isRecord(record) {
 entryDateInput.value = getShanghaiDay();
 exportStartDateInput.value = getMonthStartDay();
 exportEndDateInput.value = getShanghaiDay();
+tripStatusFilter.value = "active";
 calendarViewMonth = exportStartDateInput.value.slice(0, 7);
 updateDateRangeText();
 updateDetailDateRangeText();

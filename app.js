@@ -130,7 +130,7 @@ const tripExpenseGroups = [
   { minor: "出差其他", label: "其他" }
 ];
 const cloudRecordFields =
-  "id,type,person,amount,benefit,major,minor,note,spent_on,created_at,created_by,trip_id,trip_role,trip_linked_at,trip_original_major,trip_original_minor";
+  "id,type,person,amount,benefit,major,minor,note,spent_on,created_at,updated_at,deleted_at,created_by,trip_id,trip_role,trip_linked_at,trip_original_major,trip_original_minor";
 const cloudTripFields =
   "id,trip_no,traveler,subject,destination,start_on,end_on,daily_allowance,status,reimbursement_amount,reimbursed_on,expense_total_at_archive,allowance_total_at_archive,surplus_at_archive,settlement_record_id,archived_at,deleted_at,created_at,updated_at,created_by";
 const hasSupabaseConfig = Boolean(config.SUPABASE_URL && config.SUPABASE_ANON_KEY);
@@ -146,8 +146,13 @@ let currentUser = null;
 let isCloudReady = false;
 let editingRecordId = "";
 let editingTripId = "";
+let editingRecordBaseUpdatedAt = "";
+let editingTripBaseUpdatedAt = "";
+let lastCloudRecordError = null;
 let activeTripId = "";
 let lastCloudTripError = null;
+let cloudSyncPromise = null;
+let lastSuccessfulSyncAt = 0;
 let preferredPerson = localStorage.getItem(`${storageKey}-preferred-person`) || "";
 
 const form = document.querySelector("#entryForm");
@@ -307,6 +312,10 @@ receiptBatchCancelBtn.addEventListener("click", clearReceiptBatch);
 window.addEventListener("pagehide", () => {
   if (receiptOcrWorker) receiptOcrWorker.terminate().catch(() => {});
 });
+window.addEventListener("focus", refreshCloudWhenForeground);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") refreshCloudWhenForeground();
+});
 
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -318,6 +327,7 @@ loginForm.addEventListener("submit", async (event) => {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (!canMutateLedger()) return;
   const amount = Number.parseFloat(amountInput.value.replace(",", "."));
 
   if (!Number.isFinite(amount) || amount <= 0) {
@@ -335,7 +345,7 @@ form.addEventListener("submit", async (event) => {
   if (!tripAssociation) return;
 
   if (editingRecordId) {
-    const updatedRecord = {
+    let updatedRecord = {
       ...existingRecord,
       type: activeType,
       person: personSelect.value,
@@ -345,21 +355,26 @@ form.addEventListener("submit", async (event) => {
       minor: minorSelect.value,
       note: noteInput.value.trim(),
       date: entryDateInput.value,
+      updatedAt: new Date().toISOString(),
       ...tripAssociation
     };
+
+    if (isCloudReady) {
+      const savedRecord = await saveCloudRecord(updatedRecord, {
+        baseUpdatedAt: editingRecordBaseUpdatedAt || existingRecord.updatedAt
+      });
+      if (!savedRecord) return;
+      updatedRecord = savedRecord;
+    }
 
     records = records.map((item) => (item.id === editingRecordId ? updatedRecord : item));
     saveRecords();
     cancelEdit();
     render();
-
-    if (isCloudReady) {
-      await saveCloudRecord(updatedRecord);
-    }
     return;
   }
 
-  const record = {
+  let record = {
     id: createUuid(),
     type: activeType,
     person: personSelect.value,
@@ -370,18 +385,21 @@ form.addEventListener("submit", async (event) => {
     note: noteInput.value.trim(),
     date: entryDateInput.value,
     createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
     createdBy: currentUser?.id || "",
     ...tripAssociation
   };
+
+  if (isCloudReady) {
+    const savedRecord = await saveCloudRecord(record, { isNew: true });
+    if (!savedRecord) return;
+    record = savedRecord;
+  }
 
   records.unshift(record);
   saveRecords();
   resetForm();
   render();
-
-  if (isCloudReady) {
-    await saveCloudRecord(record);
-  }
 });
 
 document.querySelector("#exportBtn").addEventListener("click", () => {
@@ -404,21 +422,29 @@ document.querySelector("#importFile").addEventListener("change", async (event) =
 
   try {
     const imported = JSON.parse(await file.text());
+    let importedRecords = [];
+    let importedTrips = null;
     if (Array.isArray(imported)) {
-      records = migrateRecords(imported.filter(isRecord));
+      importedRecords = migrateRecords(imported.filter(isRecord));
     } else if (imported && Array.isArray(imported.records) && Array.isArray(imported.trips)) {
-      records = migrateRecords(imported.records.filter(isRecord));
-      trips = imported.trips.filter(isTrip).map(normalizeTrip);
-      saveTrips();
+      importedRecords = migrateRecords(imported.records.filter(isRecord));
+      importedTrips = imported.trips.filter(isTrip).map(normalizeTrip);
     } else {
       throw new Error("Invalid data");
     }
-    saveRecords();
-    render();
+
+    if (!canMutateLedger()) return;
     if (isCloudReady) {
-      await uploadMissingLocalTrips();
-      await uploadMissingLocalRecords();
+      const tripLabel = importedTrips ? `、${importedTrips.length} 个出差项目` : "";
+      if (!confirm(`确定恢复这份备份吗？\n\n将把 ${importedRecords.length} 条账目${tripLabel}写入当前家庭云端账本；相同 ID 的云端数据会以这份备份为准。`)) return;
+      if (!(await restoreBackupToCloud(importedRecords, importedTrips))) return;
       await syncCloudRecords();
+    } else {
+      records = importedRecords;
+      if (importedTrips) trips = importedTrips;
+      saveRecords();
+      saveTrips();
+      render();
     }
   } catch {
     alert("导入失败，请选择之前导出的家庭记账 JSON 文件。");
@@ -454,8 +480,9 @@ clearBtn.addEventListener("click", async () => {
     }
     const { error: tripError } = await supabaseClient.from("business_trips").delete().eq("family_id", familyId);
     if (tripError) {
-      await uploadMissingLocalRecords();
       setCloudState("出差项目清空失败", formatCloudSchemaError(tripError));
+      await syncCloudRecords({ quiet: true });
+      alert("账目已从云端删除，但出差项目删除失败；页面已重新读取云端当前状态，请重试清空。\n\n系统不会再把本机旧缓存自动写回云端。");
       return;
     }
   }
@@ -651,7 +678,8 @@ async function getRecordsForExport(startDate = "", endDate = "") {
     let query = supabaseClient
       .from("records")
       .select(cloudRecordFields)
-      .eq("family_id", familyId);
+      .eq("family_id", familyId)
+      .is("deleted_at", null);
     if (startDate) query = query.gte("spent_on", startDate);
     if (endDate) query = query.lte("spent_on", endDate);
     const { data, error } = await query.order("spent_on", { ascending: true });
@@ -688,6 +716,7 @@ async function clearSelectedRangeRecords() {
       .from("records")
       .select(cloudRecordFields)
       .eq("family_id", familyId)
+      .is("deleted_at", null)
       .is("trip_id", null)
       .is("trip_role", null)
       .gte("spent_on", startDate)
@@ -964,6 +993,7 @@ function sortRecordsBySpentDate(items) {
 
 function startNewTrip() {
   editingTripId = "";
+  editingTripBaseUpdatedAt = "";
   tripForm.reset();
   tripFormTitle.textContent = "新建出差";
   tripTravelerSelect.disabled = false;
@@ -987,6 +1017,7 @@ function startEditTrip(tripId) {
   }
 
   editingTripId = trip.id;
+  editingTripBaseUpdatedAt = trip.updatedAt || "";
   tripFormTitle.textContent = "编辑出差项目";
   tripTravelerSelect.disabled = true;
   tripTravelerSelect.value = trip.traveler;
@@ -1003,6 +1034,7 @@ function startEditTrip(tripId) {
 
 function closeTripForm() {
   editingTripId = "";
+  editingTripBaseUpdatedAt = "";
   tripTravelerSelect.disabled = false;
   tripForm.reset();
   tripFormPanel.hidden = true;
@@ -1028,6 +1060,7 @@ function generateTripNumber(traveler, startDate) {
 
 async function saveTripFromForm(event) {
   event.preventDefault();
+  if (!canMutateLedger()) return;
   const dailyAllowance = Number.parseFloat(String(tripDailyAllowanceInput.value || "0").replace(",", "."));
   const status = tripStatusSelect.value;
   const startDate = tripStartDateInput.value;
@@ -1084,6 +1117,25 @@ async function saveTripFromForm(event) {
     createdBy: existingTrip?.createdBy || currentUser?.id || ""
   });
 
+  if (isCloudReady) {
+    let saved = await saveCloudTrip(trip, {
+      isNew: !existingTrip,
+      baseUpdatedAt: editingTripBaseUpdatedAt || existingTrip?.updatedAt || ""
+    });
+    let retryCount = 0;
+    while (!saved && !existingTrip && lastCloudTripError?.code === "23505" && retryCount < 5) {
+      retryCount += 1;
+      trip = normalizeTrip({ ...trip, tripNo: incrementTripNumber(trip.tripNo), updatedAt: new Date().toISOString() });
+      tripNumberInput.value = trip.tripNo;
+      saved = await saveCloudTrip(trip, { isNew: true });
+    }
+    if (!saved && lastCloudTripError?.code === "23505") {
+      alert("云端同时创建了多个同月项目，编号仍有冲突。请先同步后再新建。");
+    }
+    if (!saved) return;
+    trip = saved;
+  }
+
   if (existingTrip) {
     trips = trips.map((item) => (item.id === trip.id ? trip : item));
   } else {
@@ -1093,21 +1145,6 @@ async function saveTripFromForm(event) {
   saveTrips();
   closeTripForm();
   render();
-  if (isCloudReady) {
-    let saved = await saveCloudTrip(trip);
-    let retryCount = 0;
-    while (!saved && !existingTrip && lastCloudTripError?.code === "23505" && retryCount < 5) {
-      retryCount += 1;
-      trip = normalizeTrip({ ...trip, tripNo: incrementTripNumber(trip.tripNo), updatedAt: new Date().toISOString() });
-      trips = trips.map((item) => (item.id === trip.id ? trip : item));
-      saveTrips();
-      render();
-      saved = await saveCloudTrip(trip);
-    }
-    if (!saved && lastCloudTripError?.code === "23505") {
-      alert("云端同时创建了多个同月项目，编号仍有冲突。请先同步后再新建。");
-    }
-  }
 }
 
 function incrementTripNumber(tripNo) {
@@ -1277,6 +1314,7 @@ function closeTripAssignPanel() {
 }
 
 async function assignSelectedRecordsToTrip() {
+  if (!canMutateLedger()) return;
   const trip = trips.find((item) => item.id === activeTripId && !item.deletedAt);
   if (!trip || trip.archivedAt) return;
   const selectedIds = new Set(
@@ -1288,8 +1326,8 @@ async function assignSelectedRecordsToTrip() {
   }
 
   const linkedAt = new Date().toISOString();
-  const changedRecords = [];
-  records = records.map((record) => {
+  const recordChanges = [];
+  let nextRecords = records.map((record) => {
     if (!selectedIds.has(record.id) || record.tripId || record.type !== "expense") return record;
     const updatedRecord = {
       ...record,
@@ -1299,24 +1337,33 @@ async function assignSelectedRecordsToTrip() {
       tripOriginalMajor: record.major,
       tripOriginalMinor: record.minor,
       major: "出差",
-      minor: tripAssignMinor.value
+      minor: tripAssignMinor.value,
+      updatedAt: linkedAt
     };
-    changedRecords.push(updatedRecord);
+    recordChanges.push({ record: updatedRecord, baseUpdatedAt: record.updatedAt || "" });
     return updatedRecord;
   });
+
+  if (isCloudReady && recordChanges.length) {
+    const savedRecords = await saveCloudRecords(recordChanges);
+    if (!savedRecords) return;
+    const savedById = new Map(savedRecords.map((record) => [record.id, record]));
+    nextRecords = nextRecords.map((record) => savedById.get(record.id) || record);
+  }
+  records = nextRecords;
   saveRecords();
   closeTripAssignPanel();
   render();
-  if (isCloudReady && changedRecords.length) await saveCloudRecords(changedRecords);
 }
 
 async function unlinkRecordFromTrip(recordId) {
+  if (!canMutateLedger()) return;
   const record = records.find((item) => item.id === recordId);
   const trip = trips.find((item) => item.id === record?.tripId);
   if (!record || record.tripRole !== "expense" || trip?.archivedAt) return;
   if (!confirm("确定将这笔费用移回日常账本吗？")) return;
 
-  const updatedRecord = {
+  let updatedRecord = {
     ...record,
     major: record.tripOriginalMajor || record.major,
     minor: record.tripOriginalMinor || record.minor,
@@ -1324,15 +1371,21 @@ async function unlinkRecordFromTrip(recordId) {
     tripRole: "",
     tripLinkedAt: "",
     tripOriginalMajor: "",
-    tripOriginalMinor: ""
+    tripOriginalMinor: "",
+    updatedAt: new Date().toISOString()
   };
+  if (isCloudReady) {
+    const savedRecord = await saveCloudRecord(updatedRecord, { baseUpdatedAt: record.updatedAt || "" });
+    if (!savedRecord) return;
+    updatedRecord = savedRecord;
+  }
   records = records.map((item) => (item.id === recordId ? updatedRecord : item));
   saveRecords();
   render();
-  if (isCloudReady) await saveCloudRecord(updatedRecord);
 }
 
 async function deleteTrip(trip) {
+  if (!canMutateLedger()) return;
   if (!trip || trip.archivedAt) return;
   const expenses = getTripExpenses(trip.id);
   const message = expenses.length
@@ -1341,7 +1394,7 @@ async function deleteTrip(trip) {
   if (!confirm(message)) return;
 
   const changedRecords = [];
-  records = records.map((record) => {
+  let nextRecords = records.map((record) => {
     if (record.tripId !== trip.id || record.tripRole !== "expense") return record;
     const updatedRecord = {
       ...record,
@@ -1351,16 +1404,30 @@ async function deleteTrip(trip) {
       tripRole: "",
       tripLinkedAt: "",
       tripOriginalMajor: "",
-      tripOriginalMinor: ""
+      tripOriginalMinor: "",
+      updatedAt: new Date().toISOString()
     };
-    changedRecords.push(updatedRecord);
+    changedRecords.push({ record: updatedRecord, baseUpdatedAt: record.updatedAt || "" });
     return updatedRecord;
   });
 
   const deletedTrip = normalizeTrip({ ...trip, deletedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
-  if (isCloudReady && changedRecords.length && !(await saveCloudRecords(changedRecords))) return;
-  if (isCloudReady && !(await saveCloudTrip(deletedTrip))) return;
-  trips = trips.map((item) => (item.id === trip.id ? deletedTrip : item));
+  let savedTrip = deletedTrip;
+  if (isCloudReady) {
+    if (changedRecords.length) {
+      const savedRecords = await saveCloudRecords(changedRecords);
+      if (!savedRecords) return;
+      const savedById = new Map(savedRecords.map((record) => [record.id, record]));
+      nextRecords = nextRecords.map((record) => savedById.get(record.id) || record);
+    }
+    savedTrip = await saveCloudTrip(deletedTrip, { baseUpdatedAt: trip.updatedAt || "" });
+    if (!savedTrip) {
+      await syncCloudRecords({ quiet: true });
+      return;
+    }
+  }
+  records = nextRecords;
+  trips = trips.map((item) => (item.id === trip.id ? savedTrip : item));
   activeTripId = "";
   saveRecords();
   saveTrips();
@@ -1485,6 +1552,7 @@ function updateTripSettlementPreview() {
 
 async function archiveActiveTrip(event) {
   event.preventDefault();
+  if (!canMutateLedger()) return;
   const trip = trips.find((item) => item.id === activeTripId && !item.deletedAt);
   if (!trip || trip.archivedAt || trip.status !== "reimbursed") return;
   const reimbursementAmount = Number.parseFloat(String(tripReimbursementAmountInput.value).replace(",", "."));
@@ -1515,6 +1583,7 @@ async function archiveActiveTrip(event) {
       note: `${trip.tripNo} ${trip.subject} ${surplus > 0 ? "出差结余" : "出差未报销"}`,
       date: reimbursedOn,
       createdAt: existingSettlement?.createdAt || now,
+      updatedAt: now,
       createdBy: existingSettlement?.createdBy || currentUser?.id || "",
       tripId: trip.id,
       tripRole: "settlement",
@@ -1524,15 +1593,7 @@ async function archiveActiveTrip(event) {
     };
   }
 
-  if (existingSettlement && !settlementRecord) {
-    records = records.filter((record) => record.id !== existingSettlement.id);
-  } else if (existingSettlement && settlementRecord) {
-    records = records.map((record) => (record.id === existingSettlement.id ? settlementRecord : record));
-  } else if (settlementRecord) {
-    records = [settlementRecord, ...records];
-  }
-
-  const archivedTrip = normalizeTrip({
+  let archivedTrip = normalizeTrip({
     ...trip,
     reimbursementAmount: roundMoney(reimbursementAmount),
     reimbursedOn,
@@ -1543,24 +1604,42 @@ async function archiveActiveTrip(event) {
     archivedAt: now,
     updatedAt: now
   });
+
+  if (isCloudReady) {
+    if (existingSettlement && !settlementRecord) {
+      if (!(await deleteCloudRecord(existingSettlement))) return;
+    } else if (settlementRecord) {
+      const savedSettlement = await saveCloudRecord(settlementRecord, {
+        isNew: !existingSettlement,
+        baseUpdatedAt: existingSettlement?.updatedAt || ""
+      });
+      if (!savedSettlement) return;
+      settlementRecord = savedSettlement;
+    }
+    const savedTrip = await saveCloudTrip(archivedTrip, { baseUpdatedAt: trip.updatedAt || "" });
+    if (!savedTrip) {
+      await syncCloudRecords({ quiet: true });
+      return;
+    }
+    archivedTrip = savedTrip;
+  }
+
+  if (existingSettlement && !settlementRecord) {
+    records = records.filter((record) => record.id !== existingSettlement.id);
+  } else if (existingSettlement && settlementRecord) {
+    records = records.map((record) => (record.id === existingSettlement.id ? settlementRecord : record));
+  } else if (settlementRecord) {
+    records = [settlementRecord, ...records];
+  }
   trips = trips.map((item) => (item.id === trip.id ? archivedTrip : item));
   saveRecords();
   saveTrips();
   closeTripSettlementPanel();
   render();
-
-  if (isCloudReady) {
-    let settlementSaved = true;
-    if (existingSettlement && !settlementRecord) {
-      settlementSaved = await deleteCloudRecord(existingSettlement.id);
-    } else if (settlementRecord) {
-      settlementSaved = await saveCloudRecord(settlementRecord);
-    }
-    if (settlementSaved) await saveCloudTrip(archivedTrip);
-  }
 }
 
 async function undoTripArchive(trip) {
+  if (!canMutateLedger()) return;
   if (!trip?.archivedAt) return;
   if (!confirm(`确定撤销 ${trip.tripNo} 的归档吗？\n系统会删除已生成的结余记录，项目恢复为“已报销”，之后可以重新核对并归档。`)) return;
   const settlementRecord = getTripSettlementRecord(trip.id);
@@ -1578,11 +1657,13 @@ async function undoTripArchive(trip) {
   });
 
   if (isCloudReady) {
-    if (settlementRecord && !(await deleteCloudRecord(settlementRecord.id))) return;
-    if (!(await saveCloudTrip(reopenedTrip))) {
-      if (settlementRecord) await saveCloudRecord(settlementRecord);
+    if (settlementRecord && !(await deleteCloudRecord(settlementRecord))) return;
+    const savedTrip = await saveCloudTrip(reopenedTrip, { baseUpdatedAt: trip.updatedAt || "" });
+    if (!savedTrip) {
+      await syncCloudRecords({ quiet: true });
       return;
     }
+    Object.assign(reopenedTrip, savedTrip);
   }
 
   if (settlementRecord) records = records.filter((record) => record.id !== settlementRecord.id);
@@ -2090,6 +2171,7 @@ function clearReceiptBatch() {
 }
 
 async function importSelectedReceiptRecords() {
+  if (!canMutateLedger()) return;
   const selectedIndexes = [...receiptBatchList.querySelectorAll("[data-batch-index]:checked")].map((input) =>
     Number(input.dataset.batchIndex)
   );
@@ -2101,7 +2183,7 @@ async function importSelectedReceiptRecords() {
 
   receiptBatchAddBtn.disabled = true;
   const baseTime = Date.now();
-  const importedRecords = selectedItems.map((item, index) => ({
+  let importedRecords = selectedItems.map((item, index) => ({
     id: createUuid(),
     type: item.type,
     person: personSelect.value,
@@ -2112,15 +2194,23 @@ async function importSelectedReceiptRecords() {
     note: item.note,
     date: item.date || getShanghaiDay(),
     createdAt: new Date(baseTime + index).toISOString(),
+    updatedAt: new Date(baseTime + index).toISOString(),
     createdBy: currentUser?.id || ""
   }));
 
+  if (isCloudReady) {
+    const savedRecords = await insertCloudRecords(importedRecords);
+    if (!savedRecords) {
+      receiptBatchAddBtn.disabled = false;
+      return;
+    }
+    importedRecords = savedRecords;
+  }
   records = [...importedRecords, ...records];
   saveRecords();
   render();
   clearReceiptBatch();
   setReceiptScanStatus(`已将 ${importedRecords.length} 条流水加入账本。`, "success");
-  if (isCloudReady) await uploadMissingLocalRecords();
 }
 
 function renderRecordList(listNode, items, options = {}) {
@@ -2250,6 +2340,7 @@ function startEdit(recordId) {
   }
 
   editingRecordId = recordId;
+  editingRecordBaseUpdatedAt = record.updatedAt || "";
   setActiveType(record.type);
   personSelect.value = record.person;
   amountInput.value = record.amount;
@@ -2270,12 +2361,14 @@ function startEdit(recordId) {
 
 function cancelEdit() {
   editingRecordId = "";
+  editingRecordBaseUpdatedAt = "";
   resetForm();
   submitEntryBtn.textContent = "记一笔";
   cancelEditBtn.hidden = true;
 }
 
 async function deleteRecord(recordId) {
+  if (!canMutateLedger()) return;
   const record = records.find((item) => item.id === recordId);
   if (!record) return;
   if (record.tripRole === "settlement") {
@@ -2289,24 +2382,18 @@ async function deleteRecord(recordId) {
   }
   if (!confirm(`确定删除这条记录吗？\n${displayCategory(record.major)} / ${displayMinor(record.minor)} ${money(record.amount)}`)) return;
 
+  if (isCloudReady && !(await deleteCloudRecord(record))) return;
   records = records.filter((item) => item.id !== recordId);
   if (editingRecordId === recordId) cancelEdit();
   saveRecords();
   render();
 
-  if (isCloudReady) {
-    const { error } = await supabaseClient.from("records").delete().eq("family_id", familyId).eq("id", recordId);
-    if (error) {
-      setCloudState("删除云端记录失败", "本机已删除，稍后点“同步”会重新拉取云端记录。");
-      return;
-    }
-    setCloudState("云同步已开启", `${currentUser.email} · ${getLedgerCountLabel()}`);
-  }
+  if (isCloudReady) setCloudReadyState();
 }
 
 async function initCloud() {
   if (!supabaseClient) {
-    setCloudState("本地模式", "填好 Supabase 配置并登录后，会自动同步到云端。");
+    setCloudState("本地模式", "填好 Supabase 配置并登录后，会直接读取云端账本。");
     syncBtn.disabled = true;
     return;
   }
@@ -2336,17 +2423,43 @@ function updateAuthUi() {
   syncBtn.disabled = !supabaseClient;
 
   if (isCloudReady) {
-    setCloudState("云同步已开启", `${currentUser.email} · ${getLedgerCountLabel()}`);
+    setCloudReadyState();
   } else if (supabaseClient) {
     setCloudState("待登录", "输入 Supabase 用户邮箱和密码后即可同步。");
   } else {
-    setCloudState("本地模式", "填好 Supabase 配置并登录后，会自动同步到云端。");
+    setCloudState("本地模式", "填好 Supabase 配置并登录后，会直接读取云端账本。");
   }
 }
 
 function setCloudState(title, hint) {
   cloudStatus.textContent = title;
   cloudHint.textContent = hint;
+}
+
+function setCloudReadyState(activity = "") {
+  if (!isCloudReady) return;
+  const lastReadLabel = lastSuccessfulSyncAt
+    ? `上次读取 ${new Intl.DateTimeFormat("zh-CN", {
+        timeZone: "Asia/Shanghai",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+      }).format(new Date(lastSuccessfulSyncAt))}`
+    : "等待首次读取";
+  setCloudState("云同步已开启", `${currentUser.email} · ${getLedgerCountLabel()} · ${activity || lastReadLabel}`);
+}
+
+function canMutateLedger() {
+  if (!supabaseClient || isCloudReady) return true;
+  setCloudState("请先登录", "这个网页已配置云端账本；登录后才能修改，避免产生无法同步的本机副本。");
+  alert("请先登录云端账本后再新增、编辑、删除或导入。\n\n这样可以避免本机数据与手机数据再次分叉。");
+  return false;
+}
+
+function refreshCloudWhenForeground() {
+  if (!isCloudReady || cloudSyncPromise || editingRecordId || editingTripId) return;
+  if (Date.now() - lastSuccessfulSyncAt < 15000) return;
+  syncCloudRecords({ quiet: true });
 }
 
 async function signIn(email, password) {
@@ -2406,15 +2519,21 @@ async function signOut() {
   updateAuthUi();
 }
 
-async function syncCloudRecords() {
+async function syncCloudRecords(options = {}) {
   if (!isCloudReady) {
     updateAuthUi();
-    return;
+    return false;
   }
+  if (cloudSyncPromise) return cloudSyncPromise;
 
-  setCloudState("正在同步", "正在读取云端账本。");
-  if (!(await uploadMissingLocalTrips())) return;
-  if (!(await uploadMissingLocalRecords())) return;
+  cloudSyncPromise = pullCloudRecords(options).finally(() => {
+    cloudSyncPromise = null;
+  });
+  return cloudSyncPromise;
+}
+
+async function pullCloudRecords(options = {}) {
+  if (!options.quiet) setCloudState("正在同步", "正在直接读取云端账本，本机缓存不会上传。");
 
   const { data: tripRows, error: tripError } = await supabaseClient
     .from("business_trips")
@@ -2423,7 +2542,7 @@ async function syncCloudRecords() {
     .order("start_on", { ascending: false });
   if (tripError) {
     setCloudState("出差项目同步失败", formatCloudSchemaError(tripError));
-    return;
+    return false;
   }
 
   const { data: recordRows, error: recordError } = await supabaseClient
@@ -2434,86 +2553,217 @@ async function syncCloudRecords() {
 
   if (recordError) {
     setCloudState("账目同步失败", formatCloudSchemaError(recordError));
-    return;
+    return false;
   }
 
-  const shouldRepairCloudBenefits = recordRows.some((row) => row.benefit === "自己用");
-  const syncedRecords = recordRows.map(fromCloudRecord).filter(isRecord);
-  const migratedRecords = migrateRecords(syncedRecords);
-  trips = tripRows.map(fromCloudTrip).filter(isTrip).map(normalizeTrip);
-  records = migratedRecords;
+  trips = (tripRows || []).map(fromCloudTrip).filter(isTrip).map(normalizeTrip);
+  records = migrateRecords((recordRows || []).map(fromCloudRecord).filter(isRecord).filter((record) => !record.deletedAt));
   if (activeTripId && !trips.some((trip) => trip.id === activeTripId && !trip.deletedAt)) activeTripId = "";
   saveTrips();
   saveRecords();
   render();
-  if (shouldRepairCloudBenefits || hasBenefitMigration(syncedRecords, migratedRecords)) {
-    await uploadMissingLocalRecords();
-  }
-  setCloudState("云同步已开启", `${currentUser.email} · ${getLedgerCountLabel()}`);
-}
-
-async function uploadMissingLocalRecords() {
-  if (!isCloudReady || !records.length) return true;
-
-  const rows = records.map(toCloudRecord);
-  const { error } = await supabaseClient.from("records").upsert(rows, { onConflict: "id" });
-  if (error) {
-    setCloudState("账目上传失败", formatCloudSchemaError(error));
-    return false;
-  }
+  lastSuccessfulSyncAt = Date.now();
+  setCloudReadyState();
   return true;
 }
 
-async function saveCloudRecord(record) {
-  return saveCloudRecords([record]);
-}
+async function saveCloudRecord(record, options = {}) {
+  if (!isCloudReady) return record;
+  lastCloudRecordError = null;
+  if (!options.quiet) setCloudState("正在保存", "正在写入云端账本。");
 
-async function saveCloudRecords(recordItems) {
-  if (!isCloudReady || !recordItems.length) return true;
-  setCloudState("正在保存", "正在写入云端账本。");
-  const { error } = await supabaseClient.from("records").upsert(recordItems.map(toCloudRecord), { onConflict: "id" });
-
-  if (error) {
-    setCloudState("保存到云端失败", `${formatCloudSchemaError(error)}；已保存在本机，可稍后重试同步。`);
-    return false;
+  let response;
+  if (options.isNew) {
+    response = await supabaseClient.from("records").insert(toCloudRecord(record)).select(cloudRecordFields);
+  } else {
+    const baseUpdatedAt = options.baseUpdatedAt || record.updatedAt || "";
+    if (!baseUpdatedAt) {
+      lastCloudRecordError = { code: "MISSING_VERSION", message: "账目缺少云端版本" };
+      setCloudState("无法安全保存", "这条账目缺少云端版本，请先点“同步”读取最新数据后再试。");
+      return null;
+    }
+    response = await supabaseClient
+      .from("records")
+      .update(toCloudRecord(record))
+      .eq("family_id", familyId)
+      .eq("id", record.id)
+      .eq("updated_at", baseUpdatedAt)
+      .select(cloudRecordFields);
   }
 
-  setCloudState("云同步已开启", `${currentUser.email} · ${getLedgerCountLabel()}`);
-  return true;
-}
-
-async function uploadMissingLocalTrips() {
-  if (!isCloudReady || !trips.length) return true;
-  const { error } = await supabaseClient.from("business_trips").upsert(trips.map(toCloudTrip), { onConflict: "id" });
-  if (error) {
-    setCloudState("出差项目上传失败", formatCloudSchemaError(error));
-    return false;
+  if (response.error) {
+    lastCloudRecordError = response.error;
+    setCloudState("保存到云端失败", `${formatCloudSchemaError(response.error)}；本机界面没有写入这次修改。`);
+    return null;
   }
-  return true;
+  if (!response.data?.length) {
+    lastCloudRecordError = { code: "VERSION_CONFLICT", message: "云端账目已更新" };
+    await handleCloudVersionConflict("这条账目已被另一台设备修改或删除", { recordId: record.id });
+    return null;
+  }
+
+  const savedRecord = fromCloudRecord(response.data[0]);
+  if (!options.quiet) setCloudReadyState("刚刚保存");
+  return savedRecord;
 }
 
-async function saveCloudTrip(trip) {
-  if (!isCloudReady) return true;
+async function insertCloudRecords(recordItems) {
+  if (!isCloudReady) return recordItems;
+  if (!recordItems.length) return [];
+  setCloudState("正在保存", `正在把 ${recordItems.length} 条账目写入云端。`);
+  const { data, error } = await supabaseClient
+    .from("records")
+    .insert(recordItems.map(toCloudRecord))
+    .select(cloudRecordFields);
+  if (error) {
+    lastCloudRecordError = error;
+    setCloudState("保存到云端失败", `${formatCloudSchemaError(error)}；本机账本没有加入这些记录。`);
+    return null;
+  }
+  setCloudReadyState("刚刚保存");
+  return (data || []).map(fromCloudRecord).filter(isRecord);
+}
+
+async function saveCloudRecords(recordChanges) {
+  if (!isCloudReady) return recordChanges.map((change) => change.record || change);
+  if (!recordChanges.length) return [];
+  setCloudState("正在保存", `正在安全写入 ${recordChanges.length} 条账目。`);
+  const savedRecords = [];
+  for (const change of recordChanges) {
+    const record = change.record || change;
+    const savedRecord = await saveCloudRecord(record, {
+      isNew: Boolean(change.isNew),
+      baseUpdatedAt: change.baseUpdatedAt || "",
+      quiet: true
+    });
+    if (!savedRecord) {
+      if (savedRecords.length) await syncCloudRecords({ quiet: true });
+      return null;
+    }
+    savedRecords.push(savedRecord);
+  }
+  setCloudReadyState("刚刚保存");
+  return savedRecords;
+}
+
+async function saveCloudTrip(trip, options = {}) {
+  if (!isCloudReady) return trip;
   lastCloudTripError = null;
-  setCloudState("正在保存", "正在写入出差项目。");
-  const { error } = await supabaseClient.from("business_trips").upsert(toCloudTrip(trip), { onConflict: "id" });
-  if (error) {
-    lastCloudTripError = error;
-    setCloudState("出差项目保存失败", `${formatCloudSchemaError(error)}；已保存在本机，可稍后重试同步。`);
-    return false;
+  if (!options.quiet) setCloudState("正在保存", "正在写入出差项目。");
+
+  let response;
+  if (options.isNew) {
+    response = await supabaseClient.from("business_trips").insert(toCloudTrip(trip)).select(cloudTripFields);
+  } else {
+    const baseUpdatedAt = options.baseUpdatedAt || trip.updatedAt || "";
+    if (!baseUpdatedAt) {
+      lastCloudTripError = { code: "MISSING_VERSION", message: "出差项目缺少云端版本" };
+      setCloudState("无法安全保存", "这个出差项目缺少云端版本，请先点“同步”后再试。");
+      return null;
+    }
+    response = await supabaseClient
+      .from("business_trips")
+      .update(toCloudTrip(trip))
+      .eq("family_id", familyId)
+      .eq("id", trip.id)
+      .eq("updated_at", baseUpdatedAt)
+      .select(cloudTripFields);
   }
-  setCloudState("云同步已开启", `${currentUser.email} · ${getLedgerCountLabel()}`);
-  return true;
+
+  if (response.error) {
+    lastCloudTripError = response.error;
+    setCloudState("出差项目保存失败", `${formatCloudSchemaError(response.error)}；本机界面没有写入这次修改。`);
+    return null;
+  }
+  if (!response.data?.length) {
+    lastCloudTripError = { code: "VERSION_CONFLICT", message: "云端出差项目已更新" };
+    await handleCloudVersionConflict("这个出差项目已被另一台设备修改或删除", { tripId: trip.id });
+    return null;
+  }
+
+  const savedTrip = fromCloudTrip(response.data[0]);
+  if (!options.quiet) setCloudReadyState("刚刚保存");
+  return savedTrip;
 }
 
-async function deleteCloudRecord(recordId) {
+async function deleteCloudRecord(record) {
   if (!isCloudReady) return true;
-  const { error } = await supabaseClient.from("records").delete().eq("family_id", familyId).eq("id", recordId);
+  if (!record?.updatedAt) {
+    setCloudState("无法安全删除", "这条账目缺少云端版本，请先点“同步”后再试。");
+    return false;
+  }
+  setCloudState("正在删除", "正在从云端账本删除这条记录。");
+  const deletedAt = new Date().toISOString();
+  const { data, error } = await supabaseClient
+    .from("records")
+    .update({ deleted_at: deletedAt, updated_at: deletedAt })
+    .eq("family_id", familyId)
+    .eq("id", record.id)
+    .eq("updated_at", record.updatedAt)
+    .select("id");
   if (error) {
     setCloudState("删除云端记录失败", formatCloudSchemaError(error));
     return false;
   }
+  if (!data?.length) {
+    await handleCloudVersionConflict("这条账目已被另一台设备修改或删除", { recordId: record.id });
+    return false;
+  }
+  setCloudReadyState("刚刚删除");
   return true;
+}
+
+async function restoreBackupToCloud(recordItems, tripItems) {
+  if (!isCloudReady) return false;
+  setCloudState("正在恢复备份", "正在把选定 JSON 明确写入云端；这不是普通同步。");
+  const baseTime = Date.now();
+
+  if (tripItems?.length) {
+    const restoredTrips = tripItems.map((trip, index) =>
+      normalizeTrip({
+        ...trip,
+        updatedAt: new Date(baseTime + index).toISOString(),
+        createdBy: currentUser.id
+      })
+    );
+    const { error } = await supabaseClient.from("business_trips").upsert(restoredTrips.map(toCloudTrip), { onConflict: "id" });
+    if (error) {
+      setCloudState("出差项目恢复失败", formatCloudSchemaError(error));
+      return false;
+    }
+  }
+
+  if (recordItems.length) {
+    const restoredRecords = recordItems.map((record, index) => ({
+      ...record,
+      updatedAt: new Date(baseTime + (tripItems?.length || 0) + index).toISOString(),
+      createdBy: currentUser.id
+    }));
+    const { error } = await supabaseClient.from("records").upsert(restoredRecords.map(toCloudRecord), { onConflict: "id" });
+    if (error) {
+      setCloudState("账目恢复失败", formatCloudSchemaError(error));
+      return false;
+    }
+  }
+
+  setCloudState("备份已写入云端", "正在重新读取云端账本进行核对。");
+  return true;
+}
+
+async function handleCloudVersionConflict(message, target = {}) {
+  setCloudState("检测到多设备冲突", `${message}；正在读取云端最新版本。`);
+  await syncCloudRecords({ quiet: true });
+  let closedEditor = false;
+  if (target.recordId && editingRecordId === target.recordId) {
+    cancelEdit();
+    closedEditor = true;
+  }
+  if (target.tripId && editingTripId === target.tripId) {
+    closeTripForm();
+    closedEditor = true;
+  }
+  if (closedEditor) render();
+  alert(`${message}。\n\n为了避免覆盖另一台设备的数据，本次操作已取消，并已重新读取云端最新内容。请核对后再试。`);
 }
 
 function toCloudRecord(record) {
@@ -2529,7 +2779,9 @@ function toCloudRecord(record) {
     note: record.note || "",
     spent_on: getRecordDay(record),
     created_at: record.createdAt || new Date().toISOString(),
-    created_by: currentUser.id,
+    updated_at: record.updatedAt || record.createdAt || new Date().toISOString(),
+    deleted_at: record.deletedAt || null,
+    created_by: record.createdBy || currentUser.id,
     trip_id: record.tripId || null,
     trip_role: record.tripRole || null,
     trip_linked_at: record.tripLinkedAt || null,
@@ -2550,6 +2802,8 @@ function fromCloudRecord(row) {
     note: row.note || "",
     date: row.spent_on,
     createdAt: row.created_at,
+    updatedAt: row.updated_at || row.created_at || "",
+    deletedAt: row.deleted_at || "",
     createdBy: row.created_by || "",
     tripId: row.trip_id || "",
     tripRole: row.trip_role || "",
@@ -2581,7 +2835,7 @@ function toCloudTrip(trip) {
     deleted_at: trip.deletedAt || null,
     created_at: trip.createdAt || new Date().toISOString(),
     updated_at: trip.updatedAt || new Date().toISOString(),
-    created_by: currentUser.id
+    created_by: trip.createdBy || currentUser.id
   };
 }
 
@@ -2613,6 +2867,9 @@ function fromCloudTrip(row) {
 function formatCloudSchemaError(error) {
   const message = String(error?.message || "云端操作失败");
   const lowerMessage = message.toLowerCase();
+  if (lowerMessage.includes("updated_at") || lowerMessage.includes("deleted_at")) {
+    return "云端缺少多设备同步所需的版本字段，请先在 Supabase SQL Editor 重新运行新版 supabase-schema.sql";
+  }
   if (lowerMessage.includes("business_trips") || lowerMessage.includes("trip_id") || lowerMessage.includes("trip_role") || lowerMessage.includes("schema cache")) {
     return "云端还没有出差模块的数据表，请先在 Supabase SQL Editor 重新运行新版 supabase-schema.sql";
   }
@@ -2869,7 +3126,21 @@ function syncBenefitWithPerson() {
 }
 
 function migrateRecords(items) {
-  return items.map(normalizeRecordBenefit);
+  return items.map((record) => normalizeRecordBenefit(normalizeRecord(record)));
+}
+
+function normalizeRecord(record) {
+  return {
+    ...record,
+    updatedAt: record.updatedAt || record.createdAt || "",
+    deletedAt: record.deletedAt || "",
+    createdBy: record.createdBy || "",
+    tripId: record.tripId || "",
+    tripRole: record.tripRole || "",
+    tripLinkedAt: record.tripLinkedAt || "",
+    tripOriginalMajor: record.tripOriginalMajor || "",
+    tripOriginalMinor: record.tripOriginalMinor || ""
+  };
 }
 
 function normalizeRecordBenefit(record) {
@@ -2900,6 +3171,8 @@ function isRecord(record) {
     typeof record.date === "string" &&
     (typeof record.note === "string" || typeof record.note === "undefined") &&
     (typeof record.createdAt === "string" || typeof record.createdAt === "undefined") &&
+    (typeof record.updatedAt === "string" || typeof record.updatedAt === "undefined") &&
+    (typeof record.deletedAt === "string" || typeof record.deletedAt === "undefined") &&
     (typeof record.createdBy === "string" || typeof record.createdBy === "undefined") &&
     (typeof record.tripId === "string" || typeof record.tripId === "undefined") &&
     (typeof record.tripRole === "string" || typeof record.tripRole === "undefined") &&

@@ -126,7 +126,7 @@
             </label>
 
             <label id="tripProjectField" class="full" hidden>
-              <span>出差项目</span>
+              <span>出差项目（可以稍后归入）</span>
               <select id="tripProjectSelect" name="tripProjectSelect"></select>
             </label>
 
@@ -295,14 +295,8 @@
             <div class="section-heading">
               <div>
                 <h3>归入已有费用</h3>
-                <p>选中的费用将从日常账本移入当前项目。</p>
+                <p>只显示尚未归入项目的“出差”支出，并保留原费用小类。</p>
               </div>
-              <select id="tripAssignMinor" aria-label="归入出差费用类别">
-                <option value="出差交通">车票及交通</option>
-                <option value="出差住宿">住宿</option>
-                <option value="出差吃饭">吃饭</option>
-                <option value="出差其他">其他</option>
-              </select>
             </div>
             <div id="tripUnassignedList" class="trip-unassigned-list"></div>
             <div class="form-actions">
@@ -314,13 +308,13 @@
           <section id="tripSettlementPanel" class="trip-subpanel trip-settlement-panel" hidden>
             <div class="section-heading">
               <div>
-                <h3>结算并归档</h3>
-                <p>实际到账总额应包含费用报销和补贴。</p>
+                <h3>项目归档</h3>
+                <p>请输入单位实际打款总额，其中应包含费用报销和补贴；已关联收入仅供核对，以本次输入为准。</p>
               </div>
             </div>
             <form id="tripSettlementForm" class="trip-settlement-form">
               <label>
-                <span>实际到账总额</span>
+                <span>单位实际打款金额</span>
                 <input id="tripReimbursementAmount" inputmode="decimal" placeholder="0.00" required />
               </label>
               <label>
@@ -328,12 +322,13 @@
                 <input id="tripReimbursedOn" type="date" required />
               </label>
               <div class="trip-settlement-preview full">
-                <span>项目费用 <strong id="tripSettlementExpense">¥0.00</strong></span>
-                <span>预计补贴 <strong id="tripSettlementAllowance">¥0.00</strong></span>
-                <b id="tripSettlementResult">结余收入 ¥0.00</b>
+                <span>项目实际费用 <strong id="tripSettlementExpense">¥0.00</strong></span>
+                <span>预计补贴（参考） <strong id="tripSettlementAllowance">¥0.00</strong></span>
+                <span>已关联出差收入 <strong id="tripSettlementIncome">¥0.00</strong></span>
+                <b id="tripSettlementResult">出差盈余 ¥0.00</b>
               </div>
               <div class="form-actions full">
-                <button class="primary-action" type="submit">确认结算并归档</button>
+                <button class="primary-action" type="submit">确认项目归档</button>
                 <button id="cancelTripSettlementBtn" class="secondary-action" type="button">取消</button>
               </div>
             </form>
@@ -341,7 +336,7 @@
 
           <section class="records-section trip-expense-section">
             <div class="section-heading">
-              <h2>项目费用明细</h2>
+              <h2>项目收支明细</h2>
             </div>
             <div id="tripExpenseList" class="records-list"></div>
           </section>
@@ -418,6 +413,6 @@
     <script src="./config.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
-    <script src="./app.js?v=20260803-cloud-authority-1"></script>
+    <script src="./app.js?v=20260803-trip-archive-2"></script>
   </body>
 </html>

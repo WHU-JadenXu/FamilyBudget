@@ -20,6 +20,7 @@ const categoryMap = {
   income: {
     工资: ["工资", "奖金", "补贴"],
     理财: ["利息", "基金股票", "分红"],
+    出差: ["报销", "其他"],
     报销: ["交通报销", "餐费报销", "其他报销", "出差结余"],
     其他: ["转账", "退款", "未分类"]
   }
@@ -92,6 +93,8 @@ const minorLabels = {
   交通报销: "🚇 交通报销",
   餐费报销: "🍱 餐费报销",
   其他报销: "🧾 其他报销",
+  报销: "🧾 报销",
+  其他: "📎 其他",
   出差结余: "💼 出差结余",
   出差未报销: "📉 出差未报销",
   转账: "↔️ 转账",
@@ -217,7 +220,6 @@ const tripDetailPanel = document.querySelector("#tripDetailPanel");
 const tripDetailContent = document.querySelector("#tripDetailContent");
 const tripExpenseList = document.querySelector("#tripExpenseList");
 const tripAssignPanel = document.querySelector("#tripAssignPanel");
-const tripAssignMinor = document.querySelector("#tripAssignMinor");
 const tripUnassignedList = document.querySelector("#tripUnassignedList");
 const confirmTripAssignBtn = document.querySelector("#confirmTripAssignBtn");
 const cancelTripAssignBtn = document.querySelector("#cancelTripAssignBtn");
@@ -227,6 +229,7 @@ const tripReimbursementAmountInput = document.querySelector("#tripReimbursementA
 const tripReimbursedOnInput = document.querySelector("#tripReimbursedOn");
 const tripSettlementExpense = document.querySelector("#tripSettlementExpense");
 const tripSettlementAllowance = document.querySelector("#tripSettlementAllowance");
+const tripSettlementIncome = document.querySelector("#tripSettlementIncome");
 const tripSettlementResult = document.querySelector("#tripSettlementResult");
 const cancelTripSettlementBtn = document.querySelector("#cancelTripSettlementBtn");
 const tripOngoingCount = document.querySelector("#tripOngoingCount");
@@ -459,13 +462,13 @@ clearBtn.addEventListener("click", async () => {
   if (!records.length && !trips.length && !isCloudReady) return;
   const storageSize = getLedgerStorageSize();
   const sizeLabel = storageSize ? `\n当前本地数据约 ${formatBytes(storageSize)}。` : "";
-  const linkedExpenseCount = records.filter(isTripExpenseRecord).length;
-  const dailyRecordCount = records.length - linkedExpenseCount;
+  const linkedTripRecordCount = records.filter(isTripProjectRecord).length;
+  const dailyRecordCount = records.filter(isDailyRecord).length;
   const visibleTripCount = trips.filter((trip) => !trip.deletedAt).length;
   const deletedTripCount = trips.length - visibleTripCount;
-  const countLabel = `日常记录 ${dailyRecordCount} 条、出差费用 ${linkedExpenseCount} 条、出差项目 ${visibleTripCount} 个${deletedTripCount ? `、已删除编号留档 ${deletedTripCount} 个` : ""}`;
+  const countLabel = `日常记录 ${dailyRecordCount} 条、出差项目收支 ${linkedTripRecordCount} 条、出差项目 ${visibleTripCount} 个${deletedTripCount ? `、已删除编号留档 ${deletedTripCount} 个` : ""}`;
   const captcha = createCaptchaCode();
-  const answer = prompt(`确定清空当前账本的全部数据吗？\n${countLabel}${sizeLabel}\n\n这个操作会清空本地的日常账目、出差费用和出差项目；如果已登录同步，也会清空云端对应数据。\n\n请输入验证码 ${captcha} 后继续：`);
+  const answer = prompt(`确定清空当前账本的全部数据吗？\n${countLabel}${sizeLabel}\n\n这个操作会清空本地的日常账目、出差项目收支和出差项目；如果已登录同步，也会清空云端对应数据。\n\n请输入验证码 ${captcha} 后继续：`);
   if (answer === null) return;
   if (answer.trim().toLowerCase() !== captcha.toLowerCase()) {
     alert("验证码不一致，已取消清空。");
@@ -731,7 +734,7 @@ async function clearSelectedRangeRecords() {
 
   const scopedRecordIds = new Set([...localScopedRecords, ...cloudScopedRecords].map((record) => record.id));
   if (!scopedRecordIds.size) {
-    alert("选定时间段内没有可清空的日常记录。出差费用、项目结算和出差项目不会被此功能删除。");
+    alert("选定时间段内没有可清空的日常记录。出差项目收支、项目差值和出差项目不会被此功能删除。");
     return;
   }
 
@@ -740,7 +743,7 @@ async function clearSelectedRangeRecords() {
     ? "本机及当前家庭云端账本中的同范围日常记录都会删除。"
     : "当前仅删除本机中的同范围日常记录。";
   const answer = prompt(
-    `确定清空 ${startDate} 至 ${endDate} 的数据吗？\n\n将删除 ${scopedRecordIds.size} 条日常记录。${syncLabel}\n出差费用、项目结算和出差项目不受影响。\n\n请输入验证码 ${captcha} 后继续：`
+    `确定清空 ${startDate} 至 ${endDate} 的数据吗？\n\n将删除 ${scopedRecordIds.size} 条日常记录。${syncLabel}\n出差项目收支、项目差值和出差项目不受影响。\n\n请输入验证码 ${captcha} 后继续：`
   );
   if (answer === null) return;
   if (answer.trim().toLowerCase() !== captcha.toLowerCase()) {
@@ -829,7 +832,7 @@ function fillTripProjectOptions(preferredTripId = "") {
     .filter((trip) => !trip.archivedAt && !trip.deletedAt)
     .sort((left, right) => (right.startDate || "").localeCompare(left.startDate || ""));
   tripProjectSelect.innerHTML = [
-    `<option value="">${availableTrips.length ? "请选择出差项目" : "请先新建出差项目"}</option>`,
+    `<option value="">${availableTrips.length ? "暂不归入项目" : "暂无可关联项目"}</option>`,
     ...availableTrips.map(
       (trip) => `<option value="${escapeHtml(trip.id)}">${escapeHtml(`${trip.tripNo} · ${trip.subject}`)}</option>`
     )
@@ -840,10 +843,10 @@ function fillTripProjectOptions(preferredTripId = "") {
 }
 
 function syncTripProjectField(preferredTripId = "") {
-  const isTripExpense = activeType === "expense" && majorSelect.value === "出差";
-  tripProjectField.hidden = !isTripExpense;
-  tripProjectSelect.disabled = !isTripExpense;
-  if (!isTripExpense) {
+  const isTripRecord = majorSelect.value === "出差";
+  tripProjectField.hidden = !isTripRecord;
+  tripProjectSelect.disabled = !isTripRecord;
+  if (!isTripRecord) {
     tripProjectSelect.value = "";
     return;
   }
@@ -852,8 +855,8 @@ function syncTripProjectField(preferredTripId = "") {
 }
 
 function getEntryTripAssociation(existingRecord) {
-  const shouldLinkTrip = activeType === "expense" && majorSelect.value === "出差";
-  if (!shouldLinkTrip) {
+  const shouldLinkTrip = majorSelect.value === "出差";
+  if (!shouldLinkTrip || !tripProjectSelect.value) {
     return {
       tripId: "",
       tripRole: "",
@@ -865,7 +868,7 @@ function getEntryTripAssociation(existingRecord) {
 
   const trip = trips.find((item) => item.id === tripProjectSelect.value && !item.deletedAt);
   if (!trip || trip.archivedAt) {
-    alert(trips.some((item) => !item.archivedAt && !item.deletedAt) ? "请选择一个未归档的出差项目。" : "请先到“出差”页面新建出差项目。");
+    alert("选择的出差项目已不可用，请重新选择或暂不归入项目。");
     tripProjectSelect.focus();
     return null;
   }
@@ -884,7 +887,7 @@ function getEntryTripAssociation(existingRecord) {
 
   return {
     tripId: trip.id,
-    tripRole: "expense",
+    tripRole: activeType === "income" ? "reimbursement" : "expense",
     tripLinkedAt: existingRecord?.tripLinkedAt || new Date().toISOString(),
     tripOriginalMajor: originalMajor,
     tripOriginalMinor: originalMinor
@@ -1214,7 +1217,7 @@ function renderActiveTripDetail() {
   const totals = getTripTotals(trip);
   const statusText = trip.archivedAt ? "已归档" : tripStatusLabels[trip.status];
   const settlementDescription = trip.archivedAt
-    ? `<div><span>实际到账</span><strong>${money(trip.reimbursementAmount)}</strong></div><div><span>${trip.surplusAtArchive >= 0 ? "结余收入" : "未报销支出"}</span><strong>${money(Math.abs(trip.surplusAtArchive))}</strong></div>`
+    ? `<div><span>单位实际打款</span><strong>${money(trip.reimbursementAmount)}</strong></div><div><span>${trip.surplusAtArchive >= 0 ? "出差盈余" : "出差未报销"}</span><strong>${money(Math.abs(trip.surplusAtArchive))}</strong></div>`
     : "";
   tripDetailContent.innerHTML = `
     <div class="trip-detail-heading">
@@ -1227,6 +1230,7 @@ function renderActiveTripDetail() {
     </div>
     <div class="trip-detail-summary">
       <div><span>费用合计</span><strong>${money(totals.expenseTotal)}</strong></div>
+      <div><span>已关联出差收入</span><strong>${money(totals.incomeTotal)}</strong></div>
       <div><span>出差天数</span><strong>${totals.days ? `${totals.days} 天` : "待结束"}</strong></div>
       <div><span>预计补贴</span><strong>${money(totals.allowanceTotal)}</strong></div>
       ${settlementDescription}
@@ -1234,14 +1238,14 @@ function renderActiveTripDetail() {
     <div class="trip-detail-actions">
       ${trip.archivedAt ? "" : `<button type="button" data-trip-action="add-expense">记一笔出差费用</button><button type="button" data-trip-action="assign">归入已有费用</button><button type="button" data-trip-action="edit">编辑项目与状态</button>`}
       <button type="button" data-trip-action="export">导出报销汇总</button>
-      ${!trip.archivedAt && trip.status === "reimbursed" ? `<button class="primary-action" type="button" data-trip-action="archive">结算并归档</button>` : ""}
+      ${!trip.archivedAt && ["pending", "reimbursed"].includes(trip.status) ? `<button class="primary-action" type="button" data-trip-action="archive">项目归档</button>` : ""}
       ${trip.archivedAt ? `<button type="button" data-trip-action="undo-archive">撤销归档</button>` : `<button class="danger-action" type="button" data-trip-action="delete">删除项目</button>`}
     </div>`;
 
-  const expenses = sortRecordsBySpentDate(getTripExpenses(trip.id));
-  renderRecordList(tripExpenseList, expenses, {
-    emptyText: "这个项目还没有费用记录。",
-    limit: expenses.length,
+  const projectRecords = sortRecordsBySpentDate(getTripProjectRecords(trip.id));
+  renderRecordList(tripExpenseList, projectRecords, {
+    emptyText: "这个项目还没有收支记录。",
+    limit: projectRecords.length,
     tripMode: true,
     readOnly: Boolean(trip.archivedAt)
   });
@@ -1287,9 +1291,7 @@ function startTripExpenseEntry(trip) {
 
 function openTripAssignPanel(trip) {
   if (!trip || trip.archivedAt) return;
-  const eligibleRecords = sortRecordsBySpentDate(
-    records.filter((record) => record.type === "expense" && !record.tripId && isDailyRecord(record))
-  );
+  const eligibleRecords = sortRecordsBySpentDate(getAssignableTripExpenses(records));
   tripUnassignedList.innerHTML = eligibleRecords.length
     ? eligibleRecords
         .map(
@@ -1301,8 +1303,7 @@ function openTripAssignPanel(trip) {
             </label>`
         )
         .join("")
-    : `<div class="empty-state">没有可以归入的日常支出。</div>`;
-  tripAssignMinor.value = "出差交通";
+    : `<div class="empty-state">没有尚未归入项目的“出差”支出。</div>`;
   tripAssignPanel.hidden = false;
   closeTripSettlementPanel();
   tripAssignPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -1328,7 +1329,7 @@ async function assignSelectedRecordsToTrip() {
   const linkedAt = new Date().toISOString();
   const recordChanges = [];
   let nextRecords = records.map((record) => {
-    if (!selectedIds.has(record.id) || record.tripId || record.type !== "expense") return record;
+    if (!selectedIds.has(record.id) || record.tripId || record.tripRole || record.type !== "expense" || record.major !== "出差") return record;
     const updatedRecord = {
       ...record,
       tripId: trip.id,
@@ -1336,8 +1337,6 @@ async function assignSelectedRecordsToTrip() {
       tripLinkedAt: linkedAt,
       tripOriginalMajor: record.major,
       tripOriginalMinor: record.minor,
-      major: "出差",
-      minor: tripAssignMinor.value,
       updatedAt: linkedAt
     };
     recordChanges.push({ record: updatedRecord, baseUpdatedAt: record.updatedAt || "" });
@@ -1360,8 +1359,8 @@ async function unlinkRecordFromTrip(recordId) {
   if (!canMutateLedger()) return;
   const record = records.find((item) => item.id === recordId);
   const trip = trips.find((item) => item.id === record?.tripId);
-  if (!record || record.tripRole !== "expense" || trip?.archivedAt) return;
-  if (!confirm("确定将这笔费用移回日常账本吗？")) return;
+  if (!record || !["expense", "reimbursement"].includes(record.tripRole) || trip?.archivedAt) return;
+  if (!confirm(`确定将这笔${record.type === "income" ? "收入" : "费用"}移回日常账本吗？`)) return;
 
   let updatedRecord = {
     ...record,
@@ -1387,15 +1386,15 @@ async function unlinkRecordFromTrip(recordId) {
 async function deleteTrip(trip) {
   if (!canMutateLedger()) return;
   if (!trip || trip.archivedAt) return;
-  const expenses = getTripExpenses(trip.id);
-  const message = expenses.length
-    ? `确定删除 ${trip.tripNo} 吗？\n\n项目中的 ${expenses.length} 笔费用不会删除，会解除关联并回到日常账本。`
+  const projectRecords = getTripProjectRecords(trip.id);
+  const message = projectRecords.length
+    ? `确定删除 ${trip.tripNo} 吗？\n\n项目中的 ${projectRecords.length} 笔收支不会删除，会解除关联并回到日常账本。`
     : `确定删除 ${trip.tripNo} 吗？`;
   if (!confirm(message)) return;
 
   const changedRecords = [];
   let nextRecords = records.map((record) => {
-    if (record.tripId !== trip.id || record.tripRole !== "expense") return record;
+    if (record.tripId !== trip.id || !["expense", "reimbursement"].includes(record.tripRole)) return record;
     const updatedRecord = {
       ...record,
       major: record.tripOriginalMajor || record.major,
@@ -1438,6 +1437,20 @@ function getTripExpenses(tripId) {
   return records.filter((record) => record.tripId === tripId && record.tripRole === "expense");
 }
 
+function getTripIncomes(tripId) {
+  return records.filter((record) => record.tripId === tripId && record.tripRole === "reimbursement");
+}
+
+function getTripProjectRecords(tripId) {
+  return records.filter((record) => record.tripId === tripId && ["expense", "reimbursement"].includes(record.tripRole));
+}
+
+function getAssignableTripExpenses(recordItems) {
+  return recordItems.filter(
+    (record) => record.type === "expense" && record.major === "出差" && !record.tripId && !record.tripRole && isDailyRecord(record)
+  );
+}
+
 function getTripSettlementRecord(tripId) {
   return records.find((record) => record.tripId === tripId && record.tripRole === "settlement") || null;
 }
@@ -1452,9 +1465,10 @@ function getTripDays(trip) {
 
 function getTripTotals(trip) {
   const expenseTotal = roundMoney(getTripExpenses(trip.id).reduce((total, record) => total + record.amount, 0));
+  const incomeTotal = roundMoney(getTripIncomes(trip.id).reduce((total, record) => total + record.amount, 0));
   const days = getTripDays(trip);
   const allowanceTotal = roundMoney(days * Number(trip.dailyAllowance || 0));
-  return { expenseTotal, days, allowanceTotal };
+  return { expenseTotal, incomeTotal, days, allowanceTotal };
 }
 
 function formatTripDateRange(trip) {
@@ -1486,11 +1500,12 @@ function buildTripExpenseWorkbook(trip, expenses) {
     ["出发日期", trip.startDate, "结束日期", trip.endDate || "待定"],
     ["出差天数", totals.days ? `${totals.days} 天` : "待结束", "每日补贴", trip.dailyAllowance],
     ["预计补贴", totals.allowanceTotal, "费用合计", totals.expenseTotal],
+    ["已关联出差收入", totals.incomeTotal, "归档口径", "以人工填写的单位实际打款为准"],
     ["项目状态", trip.archivedAt ? "已归档" : tripStatusLabels[trip.status], "导出时间", formatDateTime(new Date().toISOString())]
   ];
   if (trip.archivedAt) {
     infoRows.push(["实际到账", trip.reimbursementAmount, "到账日期", trip.reimbursedOn]);
-    infoRows.push([trip.surplusAtArchive >= 0 ? "结余收入" : "未报销支出", Math.abs(trip.surplusAtArchive), "归档时间", formatDateTime(trip.archivedAt)]);
+    infoRows.push([trip.surplusAtArchive >= 0 ? "出差盈余" : "出差未报销", Math.abs(trip.surplusAtArchive), "归档时间", formatDateTime(trip.archivedAt)]);
   }
 
   const summaryRows = tripExpenseGroups.map((group) => {
@@ -1520,7 +1535,7 @@ function buildTripExpenseWorkbook(trip, expenses) {
 }
 
 function openTripSettlementPanel(trip) {
-  if (!trip || trip.archivedAt || trip.status !== "reimbursed") return;
+  if (!trip || trip.archivedAt || !["pending", "reimbursed"].includes(trip.status)) return;
   if (!trip.endDate) {
     alert("归档前必须填写结束日期。");
     return;
@@ -1546,7 +1561,8 @@ function updateTripSettlementPreview() {
   const result = roundMoney((Number.isFinite(reimbursement) ? reimbursement : 0) - totals.expenseTotal);
   tripSettlementExpense.textContent = money(totals.expenseTotal);
   tripSettlementAllowance.textContent = money(totals.allowanceTotal);
-  tripSettlementResult.textContent = `${result >= 0 ? "结余收入" : "未报销支出"} ${money(Math.abs(result))}`;
+  tripSettlementIncome.textContent = money(totals.incomeTotal);
+  tripSettlementResult.textContent = `${result >= 0 ? "出差盈余" : "出差未报销"} ${money(Math.abs(result))}`;
   tripSettlementResult.classList.toggle("negative", result < 0);
 }
 
@@ -1554,18 +1570,25 @@ async function archiveActiveTrip(event) {
   event.preventDefault();
   if (!canMutateLedger()) return;
   const trip = trips.find((item) => item.id === activeTripId && !item.deletedAt);
-  if (!trip || trip.archivedAt || trip.status !== "reimbursed") return;
+  if (!trip || trip.archivedAt || !["pending", "reimbursed"].includes(trip.status)) return;
   const reimbursementAmount = Number.parseFloat(String(tripReimbursementAmountInput.value).replace(",", "."));
   const reimbursedOn = tripReimbursedOnInput.value;
   if (!Number.isFinite(reimbursementAmount) || reimbursementAmount < 0 || !reimbursedOn) {
-    alert("请填写实际到账总额和到账日期。");
+    alert("请填写单位实际打款金额和到账日期。");
     return;
   }
 
   const totals = getTripTotals(trip);
   const surplus = roundMoney(reimbursementAmount - totals.expenseTotal);
-  const settlementLabel = surplus > 0 ? `生成日常收入 ${money(surplus)}` : surplus < 0 ? `生成日常支出 ${money(Math.abs(surplus))}` : "不生成日常收支记录";
-  if (!confirm(`请确认 ${trip.tripNo} 的结算：\n\n费用合计：${money(totals.expenseTotal)}\n实际到账：${money(reimbursementAmount)}\n${settlementLabel}\n\n归档后项目将只读。`)) return;
+  const settlementLabel = surplus > 0
+    ? `归入日常收入：工资 / 补贴 ${money(surplus)}`
+    : surplus < 0
+      ? `归入日常支出：其他 / 出差未报销 ${money(Math.abs(surplus))}`
+      : "差值为零，不生成日常收支记录";
+  const linkedIncomeLabel = totals.incomeTotal
+    ? `\n已关联出差收入：${money(totals.incomeTotal)}（仅供核对）`
+    : "";
+  if (!confirm(`请确认 ${trip.tripNo} 的归档结算：\n\n项目实际费用：${money(totals.expenseTotal)}\n单位实际打款：${money(reimbursementAmount)}${linkedIncomeLabel}\n${settlementLabel}\n\n归档后项目将只读。`)) return;
 
   const now = new Date().toISOString();
   const existingSettlement = getTripSettlementRecord(trip.id);
@@ -1578,9 +1601,9 @@ async function archiveActiveTrip(event) {
       person: trip.traveler,
       amount: Math.abs(surplus),
       benefit: surplus > 0 ? "" : `${trip.traveler}用`,
-      major: surplus > 0 ? "报销" : "其他",
-      minor: surplus > 0 ? "出差结余" : "出差未报销",
-      note: `${trip.tripNo} ${trip.subject} ${surplus > 0 ? "出差结余" : "出差未报销"}`,
+      major: surplus > 0 ? "工资" : "其他",
+      minor: surplus > 0 ? "补贴" : "出差未报销",
+      note: `${trip.tripNo} ${trip.subject} ${surplus > 0 ? "出差盈余" : "出差未报销"}`,
       date: reimbursedOn,
       createdAt: existingSettlement?.createdAt || now,
       updatedAt: now,
@@ -1595,6 +1618,7 @@ async function archiveActiveTrip(event) {
 
   let archivedTrip = normalizeTrip({
     ...trip,
+    status: "reimbursed",
     reimbursementAmount: roundMoney(reimbursementAmount),
     reimbursedOn,
     expenseTotalAtArchive: totals.expenseTotal,
@@ -1641,11 +1665,11 @@ async function archiveActiveTrip(event) {
 async function undoTripArchive(trip) {
   if (!canMutateLedger()) return;
   if (!trip?.archivedAt) return;
-  if (!confirm(`确定撤销 ${trip.tripNo} 的归档吗？\n系统会删除已生成的结余记录，项目恢复为“已报销”，之后可以重新核对并归档。`)) return;
+  if (!confirm(`确定撤销 ${trip.tripNo} 的归档吗？\n系统会删除已生成的差值记录，项目恢复为“已结束待报销”，之后可以重新核对并归档。`)) return;
   const settlementRecord = getTripSettlementRecord(trip.id);
   const reopenedTrip = normalizeTrip({
     ...trip,
-    status: "reimbursed",
+    status: "pending",
     reimbursementAmount: 0,
     reimbursedOn: "",
     expenseTotalAtArchive: 0,
@@ -2243,7 +2267,7 @@ function renderRecordList(listNode, items, options = {}) {
     if (options.readOnly) {
       actionsNode.innerHTML = `<span class="record-lock">已归档</span>`;
     } else if (record.tripRole === "settlement") {
-      actionsNode.innerHTML = `<span class="record-lock">项目结算</span>`;
+      actionsNode.innerHTML = `<span class="record-lock">项目差值</span>`;
     } else if (options.tripMode) {
       const unlinkButton = document.createElement("button");
       unlinkButton.type = "button";
@@ -2330,12 +2354,12 @@ function startEdit(recordId) {
   const record = records.find((item) => item.id === recordId);
   if (!record) return;
   if (record.tripRole === "settlement") {
-    alert("这是出差项目自动生成的结算记录，请到对应项目撤销归档后重新结算。");
+    alert("这是出差项目自动生成的差值记录，请到对应项目撤销归档后重新归档。");
     return;
   }
   const linkedTrip = trips.find((trip) => trip.id === record.tripId);
   if (linkedTrip?.archivedAt) {
-    alert("已归档项目的费用不能编辑。如需修改，请先撤销归档。");
+    alert("已归档项目的收支记录不能编辑。如需修改，请先撤销归档。");
     return;
   }
 
@@ -2372,12 +2396,12 @@ async function deleteRecord(recordId) {
   const record = records.find((item) => item.id === recordId);
   if (!record) return;
   if (record.tripRole === "settlement") {
-    alert("项目结算记录不能直接删除，请到出差项目撤销归档。");
+    alert("项目差值记录不能直接删除，请到出差项目撤销归档。");
     return;
   }
   const linkedTrip = trips.find((trip) => trip.id === record.tripId);
   if (linkedTrip?.archivedAt) {
-    alert("已归档项目的费用不能删除。如需修改，请先撤销归档。");
+    alert("已归档项目的收支记录不能删除。如需修改，请先撤销归档。");
     return;
   }
   if (!confirm(`确定删除这条记录吗？\n${displayCategory(record.major)} / ${displayMinor(record.minor)} ${money(record.amount)}`)) return;
@@ -3104,8 +3128,16 @@ function isTripExpenseRecord(record) {
   return Boolean(record?.tripId) && record.tripRole === "expense";
 }
 
+function isTripReimbursementRecord(record) {
+  return Boolean(record?.tripId) && record.tripRole === "reimbursement";
+}
+
+function isTripProjectRecord(record) {
+  return isTripExpenseRecord(record) || isTripReimbursementRecord(record);
+}
+
 function isDailyRecord(record) {
-  return !isTripExpenseRecord(record);
+  return !isTripProjectRecord(record);
 }
 
 function syncBenefitField() {

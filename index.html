@@ -10,7 +10,7 @@
     <title>家庭记账</title>
     <link rel="apple-touch-icon" href="./assets/miniapp-avatar-xl.png" />
     <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="stylesheet" href="./styles.css?v=20260727-compact-form-2" />
+    <link rel="stylesheet" href="./styles.css?v=20260803-business-trips-1" />
   </head>
   <body>
     <main class="app-shell">
@@ -126,6 +126,11 @@
               <select id="minorCategory" name="minorCategory"></select>
             </label>
 
+            <label id="tripProjectField" class="full" hidden>
+              <span>出差项目</span>
+              <select id="tripProjectSelect" name="tripProjectSelect"></select>
+            </label>
+
             <label class="full">
               <span>备注</span>
               <input id="note" name="note" autocomplete="off" placeholder="可不填" />
@@ -201,6 +206,148 @@
         </section>
       </section>
 
+      <section id="pageTrips" class="app-page" data-page="trips">
+        <section class="trip-overview-panel">
+          <div class="section-heading trip-page-heading">
+            <div>
+              <p class="eyebrow">BUSINESS TRIPS</p>
+              <h2>出差项目</h2>
+            </div>
+            <button id="newTripBtn" class="primary-action" type="button">新建出差</button>
+          </div>
+          <div class="trip-count-grid" aria-label="出差项目状态汇总">
+            <div><span>进行中</span><strong id="tripOngoingCount">0</strong></div>
+            <div><span>待报销</span><strong id="tripPendingCount">0</strong></div>
+            <div><span>已报销</span><strong id="tripReimbursedCount">0</strong></div>
+            <div><span>已归档</span><strong id="tripArchivedCount">0</strong></div>
+          </div>
+        </section>
+
+        <section id="tripFormPanel" class="trip-form-panel" hidden>
+          <div class="section-heading">
+            <h2 id="tripFormTitle">新建出差</h2>
+          </div>
+          <form id="tripForm" class="trip-form">
+            <label>
+              <span>出差人</span>
+              <select id="tripTraveler" required>
+                <option value="李逍宇">👦 李逍宇</option>
+                <option value="徐佳丹">👧 徐佳丹</option>
+              </select>
+            </label>
+            <label>
+              <span>出差编号</span>
+              <input id="tripNumber" readonly aria-readonly="true" />
+            </label>
+            <label class="full">
+              <span>出差事项</span>
+              <input id="tripSubject" autocomplete="off" placeholder="例如：吴桥变电站" required />
+            </label>
+            <label class="full">
+              <span>目的地</span>
+              <input id="tripDestination" autocomplete="off" placeholder="例如：河北唐山" required />
+            </label>
+            <label>
+              <span>出发日期</span>
+              <input id="tripStartDate" type="date" required />
+            </label>
+            <label>
+              <span>结束日期</span>
+              <input id="tripEndDate" type="date" />
+            </label>
+            <label>
+              <span>每日补贴</span>
+              <input id="tripDailyAllowance" inputmode="decimal" placeholder="0.00" required />
+            </label>
+            <label>
+              <span>状态</span>
+              <select id="tripStatus">
+                <option value="ongoing">进行中</option>
+                <option value="pending">已结束待报销</option>
+                <option value="reimbursed">已报销</option>
+              </select>
+            </label>
+            <div class="form-actions full">
+              <button class="primary-action" type="submit">保存项目</button>
+              <button id="cancelTripEditBtn" class="secondary-action" type="button">取消</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="trip-list-section">
+          <div class="section-heading">
+            <h2>项目列表</h2>
+            <select id="tripStatusFilter" aria-label="筛选出差项目状态">
+              <option value="all">全部状态</option>
+              <option value="ongoing">进行中</option>
+              <option value="pending">待报销</option>
+              <option value="reimbursed">已报销</option>
+              <option value="archived">已归档</option>
+            </select>
+          </div>
+          <div id="tripProjectList" class="trip-project-list"></div>
+        </section>
+
+        <section id="tripDetailPanel" class="trip-detail-panel" hidden>
+          <div id="tripDetailContent"></div>
+
+          <section id="tripAssignPanel" class="trip-subpanel" hidden>
+            <div class="section-heading">
+              <div>
+                <h3>归入已有费用</h3>
+                <p>选中的费用将从日常账本移入当前项目。</p>
+              </div>
+              <select id="tripAssignMinor" aria-label="归入出差费用类别">
+                <option value="出差交通">车票及交通</option>
+                <option value="出差住宿">住宿</option>
+                <option value="出差吃饭">吃饭</option>
+                <option value="出差其他">其他</option>
+              </select>
+            </div>
+            <div id="tripUnassignedList" class="trip-unassigned-list"></div>
+            <div class="form-actions">
+              <button id="confirmTripAssignBtn" class="primary-action" type="button">归入选中费用</button>
+              <button id="cancelTripAssignBtn" class="secondary-action" type="button">取消</button>
+            </div>
+          </section>
+
+          <section id="tripSettlementPanel" class="trip-subpanel trip-settlement-panel" hidden>
+            <div class="section-heading">
+              <div>
+                <h3>结算并归档</h3>
+                <p>实际到账总额应包含费用报销和补贴。</p>
+              </div>
+            </div>
+            <form id="tripSettlementForm" class="trip-settlement-form">
+              <label>
+                <span>实际到账总额</span>
+                <input id="tripReimbursementAmount" inputmode="decimal" placeholder="0.00" required />
+              </label>
+              <label>
+                <span>实际到账日期</span>
+                <input id="tripReimbursedOn" type="date" required />
+              </label>
+              <div class="trip-settlement-preview full">
+                <span>项目费用 <strong id="tripSettlementExpense">¥0.00</strong></span>
+                <span>预计补贴 <strong id="tripSettlementAllowance">¥0.00</strong></span>
+                <b id="tripSettlementResult">结余收入 ¥0.00</b>
+              </div>
+              <div class="form-actions full">
+                <button class="primary-action" type="submit">确认结算并归档</button>
+                <button id="cancelTripSettlementBtn" class="secondary-action" type="button">取消</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="records-section trip-expense-section">
+            <div class="section-heading">
+              <h2>项目费用明细</h2>
+            </div>
+            <div id="tripExpenseList" class="records-list"></div>
+          </section>
+        </section>
+      </section>
+
       <section id="pageExport" class="app-page" data-page="export">
         <section class="toolbar" aria-label="数据工具">
           <div class="date-range-picker">
@@ -237,13 +384,14 @@
               <input id="importFile" type="file" accept="application/json" />
             </label>
           </div>
-          <button id="clearBtn" class="danger-action" type="button">清空全部记录</button>
+          <button id="clearBtn" class="danger-action" type="button">清空全部数据</button>
         </section>
       </section>
 
       <nav class="bottom-tabs" aria-label="页面切换">
         <button class="bottom-tab active" data-target-page="entry" type="button">记录</button>
         <button class="bottom-tab" data-target-page="records" type="button">明细</button>
+        <button class="bottom-tab" data-target-page="trips" type="button">出差</button>
         <button class="bottom-tab" data-target-page="export" type="button">导出</button>
       </nav>
     </main>
@@ -266,6 +414,6 @@
     <script src="./config.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
-    <script src="./app.js?v=20260727-single-receipt-1"></script>
+    <script src="./app.js?v=20260803-business-trips-1"></script>
   </body>
 </html>

@@ -783,6 +783,338 @@ select:focus {
   color: var(--danger);
 }
 
+.record-lock {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: right;
+}
+
+.trip-overview-panel,
+.trip-form-panel,
+.trip-list-section,
+.trip-detail-panel {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.trip-page-heading {
+  align-items: flex-end;
+}
+
+.trip-page-heading .eyebrow {
+  margin-bottom: 3px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+}
+
+#newTripBtn {
+  min-height: 42px;
+  padding: 0 15px;
+}
+
+.trip-count-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.trip-count-grid div {
+  padding: 10px 6px;
+  border-radius: 8px;
+  background: var(--soft);
+  text-align: center;
+}
+
+.trip-count-grid span,
+.trip-count-grid strong {
+  display: block;
+}
+
+.trip-count-grid span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.trip-count-grid strong {
+  margin-top: 3px;
+  color: var(--green-dark);
+  font-size: 20px;
+}
+
+.trip-form,
+.trip-settlement-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+#tripNumber[readonly] {
+  background: #edf1ef;
+  color: var(--muted);
+  cursor: default;
+}
+
+.trip-project-list {
+  display: grid;
+  gap: 9px;
+}
+
+.trip-card {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+}
+
+.trip-card.active {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgba(35, 113, 92, 0.1);
+}
+
+.trip-card-main {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  min-height: 106px;
+  border: 0;
+  background: transparent;
+  padding: 12px;
+  color: var(--ink);
+  text-align: left;
+}
+
+.trip-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.trip-card-title {
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.trip-card-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.trip-card-total {
+  color: var(--green-dark);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.trip-status {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 25px;
+  border-radius: 999px;
+  padding: 3px 9px;
+  background: #e8f1ed;
+  color: var(--green-dark);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.trip-status.status-pending {
+  background: #fff4d8;
+  color: #865e0e;
+}
+
+.trip-status.status-reimbursed {
+  background: #e7eef9;
+  color: var(--blue);
+}
+
+.trip-status.status-archived {
+  background: #ecefee;
+  color: var(--muted);
+}
+
+.trip-detail-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.trip-detail-heading h2 {
+  margin-top: 4px;
+  font-size: 22px;
+}
+
+.trip-detail-heading p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.trip-number {
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+.trip-detail-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.trip-detail-summary div {
+  min-width: 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--soft);
+}
+
+.trip-detail-summary span,
+.trip-detail-summary strong {
+  display: block;
+}
+
+.trip-detail-summary span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.trip-detail-summary strong {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+
+.trip-detail-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.trip-detail-actions button {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--green-dark);
+  padding: 7px 10px;
+  font-weight: 800;
+}
+
+.trip-detail-actions .primary-action {
+  border: 0;
+  background: var(--amber);
+  color: #201a10;
+}
+
+.trip-detail-actions .danger-action {
+  min-height: 42px;
+}
+
+.trip-subpanel {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--soft);
+}
+
+.trip-subpanel h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.trip-subpanel p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.trip-unassigned-list {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  margin-bottom: 10px;
+  overflow-y: auto;
+}
+
+.trip-assign-record {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 66px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+}
+
+.trip-assign-record input {
+  width: 22px;
+  min-height: 22px;
+  margin: 0;
+}
+
+.trip-assign-record strong,
+.trip-assign-record small {
+  display: block;
+}
+
+.trip-assign-record small {
+  margin-top: 3px;
+  color: var(--muted);
+}
+
+.trip-assign-record b {
+  white-space: nowrap;
+}
+
+.trip-settlement-preview {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 11px;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.trip-settlement-preview span,
+.trip-settlement-preview b {
+  font-size: 12px;
+}
+
+.trip-settlement-preview b {
+  grid-column: 1 / -1;
+  color: var(--blue);
+  font-size: 15px;
+}
+
+.trip-settlement-preview b.negative {
+  color: var(--danger);
+}
+
+.trip-expense-section {
+  padding-top: 2px;
+}
+
+.trip-expense-section .record-actions {
+  grid-template-columns: repeat(3, 1fr);
+  width: min(280px, 100%);
+}
+
 .empty-state {
   padding: 26px 16px;
   border: 1px dashed var(--line);
@@ -797,8 +1129,8 @@ select:focus {
   bottom: 0;
   z-index: 10;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
   width: min(100%, 480px);
   padding: 10px 14px max(10px, env(safe-area-inset-bottom));
   border-top: 1px solid var(--line);
@@ -838,7 +1170,18 @@ select:focus {
   }
 
   .entry-form,
-  .detail-filters {
+  .detail-filters,
+  .trip-form,
+  .trip-settlement-form {
+    grid-template-columns: 1fr;
+  }
+
+  .trip-count-grid,
+  .trip-detail-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .trip-detail-actions {
     grid-template-columns: 1fr;
   }
 
@@ -877,6 +1220,11 @@ select:focus {
 
   .record-actions {
     grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .trip-expense-section .record-actions {
+    grid-template-columns: 1fr;
     width: 100%;
   }
 }

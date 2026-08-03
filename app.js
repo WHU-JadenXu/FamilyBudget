@@ -9,17 +9,18 @@ const categoryMap = {
   expense: {
     餐饮: ["早餐", "午餐", "晚餐", "买菜", "水果零食", "咖啡奶茶"],
     交通: ["地铁公交", "打车", "加油充电", "停车", "高铁机票"],
+    出差: ["出差吃饭", "出差住宿", "出差交通", "出差其他"],
     居家: ["房租房贷", "水电燃气", "网费", "话费", "会员费", "物业", "家政", "维修"],
     购物: ["日用品", "服饰", "数码", "护肤美妆", "礼物"],
     医疗: ["挂号", "药品", "体检", "保险"],
     娱乐: ["电影演出", "旅行", "游戏会员", "聚会", "运动"],
     人情: ["红包", "请客", "父母家人", "朋友往来"],
-    其他: ["未分类"]
+    其他: ["未分类", "出差未报销"]
   },
   income: {
     工资: ["工资", "奖金", "补贴"],
     理财: ["利息", "基金股票", "分红"],
-    报销: ["交通报销", "餐费报销", "其他报销"],
+    报销: ["交通报销", "餐费报销", "其他报销", "出差结余"],
     其他: ["转账", "退款", "未分类"]
   }
 };
@@ -27,6 +28,7 @@ const categoryMap = {
 const categoryLabels = {
   餐饮: "🍜 餐饮",
   交通: "🚇 交通",
+  出差: "🧳 出差",
   居家: "🏠 居家",
   购物: "🛍️ 购物",
   医疗: "💊 医疗",
@@ -50,6 +52,10 @@ const minorLabels = {
   加油充电: "⛽ 加油充电",
   停车: "🅿️ 停车",
   高铁机票: "🚄 高铁机票",
+  出差吃饭: "🍱 出差吃饭",
+  出差住宿: "🏨 出差住宿",
+  出差交通: "🎫 出差交通",
+  出差其他: "📎 出差其他",
   房租房贷: "🏡 房租房贷",
   水电燃气: "💡 水电燃气",
   网费: "🌐 网费",
@@ -86,6 +92,8 @@ const minorLabels = {
   交通报销: "🚇 交通报销",
   餐费报销: "🍱 餐费报销",
   其他报销: "🧾 其他报销",
+  出差结余: "💼 出差结余",
+  出差未报销: "📉 出差未报销",
   转账: "↔️ 转账",
   退款: "↩️ 退款"
 };
@@ -97,6 +105,7 @@ const benefitLabels = {
 };
 
 const storageKey = "family-ledger-web-v1";
+const tripStorageKey = "family-ledger-trips-v1";
 const config = window.LEDGER_CONFIG || {};
 const familyId = config.FAMILY_ID || "li-xu-family";
 const configuredSiteUrl = (config.SITE_URL || "").trim();
@@ -105,6 +114,25 @@ const accountPersonHashes = {
   bc4d99bb615536adf2339e5d10d749dd13e16350993b48a485370d2a6437840a: "李逍宇",
   ...(config.ACCOUNT_PERSON_HASHES || {})
 };
+const tripNumberPrefixes = {
+  李逍宇: "LXY",
+  徐佳丹: "XJD"
+};
+const tripStatusLabels = {
+  ongoing: "进行中",
+  pending: "已结束待报销",
+  reimbursed: "已报销"
+};
+const tripExpenseGroups = [
+  { minor: "出差交通", label: "车票及交通" },
+  { minor: "出差住宿", label: "住宿" },
+  { minor: "出差吃饭", label: "吃饭" },
+  { minor: "出差其他", label: "其他" }
+];
+const cloudRecordFields =
+  "id,type,person,amount,benefit,major,minor,note,spent_on,created_at,created_by,trip_id,trip_role,trip_linked_at,trip_original_major,trip_original_minor";
+const cloudTripFields =
+  "id,trip_no,traveler,subject,destination,start_on,end_on,daily_allowance,status,reimbursement_amount,reimbursed_on,expense_total_at_archive,allowance_total_at_archive,surplus_at_archive,settlement_record_id,archived_at,deleted_at,created_at,updated_at,created_by";
 const hasSupabaseConfig = Boolean(config.SUPABASE_URL && config.SUPABASE_ANON_KEY);
 const supabaseClient =
   hasSupabaseConfig && window.supabase
@@ -113,9 +141,13 @@ const supabaseClient =
 
 let activeType = "expense";
 let records = loadRecords();
+let trips = loadTrips();
 let currentUser = null;
 let isCloudReady = false;
 let editingRecordId = "";
+let editingTripId = "";
+let activeTripId = "";
+let lastCloudTripError = null;
 let preferredPerson = localStorage.getItem(`${storageKey}-preferred-person`) || "";
 
 const form = document.querySelector("#entryForm");
@@ -127,6 +159,8 @@ const benefitSelect = document.querySelector("#benefit");
 const majorSelect = document.querySelector("#majorCategory");
 const minorSelect = document.querySelector("#minorCategory");
 const noteInput = document.querySelector("#note");
+const tripProjectField = document.querySelector("#tripProjectField");
+const tripProjectSelect = document.querySelector("#tripProjectSelect");
 const recentRecordsList = document.querySelector("#recentRecordsList");
 const allRecordsList = document.querySelector("#allRecordsList");
 const recordLimitSelect = document.querySelector("#recordLimit");
@@ -158,6 +192,41 @@ const syncBtn = document.querySelector("#syncBtn");
 const logoutBtn = document.querySelector("#logoutBtn");
 const submitEntryBtn = document.querySelector("#submitEntryBtn");
 const cancelEditBtn = document.querySelector("#cancelEditBtn");
+const newTripBtn = document.querySelector("#newTripBtn");
+const tripFormPanel = document.querySelector("#tripFormPanel");
+const tripForm = document.querySelector("#tripForm");
+const tripFormTitle = document.querySelector("#tripFormTitle");
+const tripTravelerSelect = document.querySelector("#tripTraveler");
+const tripNumberInput = document.querySelector("#tripNumber");
+const tripSubjectInput = document.querySelector("#tripSubject");
+const tripDestinationInput = document.querySelector("#tripDestination");
+const tripStartDateInput = document.querySelector("#tripStartDate");
+const tripEndDateInput = document.querySelector("#tripEndDate");
+const tripDailyAllowanceInput = document.querySelector("#tripDailyAllowance");
+const tripStatusSelect = document.querySelector("#tripStatus");
+const cancelTripEditBtn = document.querySelector("#cancelTripEditBtn");
+const tripStatusFilter = document.querySelector("#tripStatusFilter");
+const tripProjectList = document.querySelector("#tripProjectList");
+const tripDetailPanel = document.querySelector("#tripDetailPanel");
+const tripDetailContent = document.querySelector("#tripDetailContent");
+const tripExpenseList = document.querySelector("#tripExpenseList");
+const tripAssignPanel = document.querySelector("#tripAssignPanel");
+const tripAssignMinor = document.querySelector("#tripAssignMinor");
+const tripUnassignedList = document.querySelector("#tripUnassignedList");
+const confirmTripAssignBtn = document.querySelector("#confirmTripAssignBtn");
+const cancelTripAssignBtn = document.querySelector("#cancelTripAssignBtn");
+const tripSettlementPanel = document.querySelector("#tripSettlementPanel");
+const tripSettlementForm = document.querySelector("#tripSettlementForm");
+const tripReimbursementAmountInput = document.querySelector("#tripReimbursementAmount");
+const tripReimbursedOnInput = document.querySelector("#tripReimbursedOn");
+const tripSettlementExpense = document.querySelector("#tripSettlementExpense");
+const tripSettlementAllowance = document.querySelector("#tripSettlementAllowance");
+const tripSettlementResult = document.querySelector("#tripSettlementResult");
+const cancelTripSettlementBtn = document.querySelector("#cancelTripSettlementBtn");
+const tripOngoingCount = document.querySelector("#tripOngoingCount");
+const tripPendingCount = document.querySelector("#tripPendingCount");
+const tripReimbursedCount = document.querySelector("#tripReimbursedCount");
+const tripArchivedCount = document.querySelector("#tripArchivedCount");
 const exportStartDateInput = document.querySelector("#exportStartDate");
 const exportEndDateInput = document.querySelector("#exportEndDate");
 const dateRangeBtn = document.querySelector("#dateRangeBtn");
@@ -187,7 +256,10 @@ document.querySelectorAll(".segment").forEach((button) => {
   });
 });
 
-majorSelect.addEventListener("change", fillMinorCategories);
+majorSelect.addEventListener("change", () => {
+  fillMinorCategories();
+  syncTripProjectField();
+});
 personSelect.addEventListener("change", syncBenefitWithPerson);
 recordLimitSelect.addEventListener("change", render);
 filterPerson.addEventListener("change", render);
@@ -200,6 +272,20 @@ allRecordsList.addEventListener("click", handleRecordAction);
 syncBtn.addEventListener("click", syncCloudRecords);
 logoutBtn.addEventListener("click", signOut);
 cancelEditBtn.addEventListener("click", cancelEdit);
+newTripBtn.addEventListener("click", startNewTrip);
+tripForm.addEventListener("submit", saveTripFromForm);
+cancelTripEditBtn.addEventListener("click", closeTripForm);
+tripTravelerSelect.addEventListener("change", updateGeneratedTripNumber);
+tripStartDateInput.addEventListener("change", updateGeneratedTripNumber);
+tripStatusFilter.addEventListener("change", renderTrips);
+tripProjectList.addEventListener("click", handleTripProjectAction);
+tripDetailPanel.addEventListener("click", handleTripDetailAction);
+tripExpenseList.addEventListener("click", handleRecordAction);
+confirmTripAssignBtn.addEventListener("click", assignSelectedRecordsToTrip);
+cancelTripAssignBtn.addEventListener("click", closeTripAssignPanel);
+tripReimbursementAmountInput.addEventListener("input", updateTripSettlementPreview);
+tripSettlementForm.addEventListener("submit", archiveActiveTrip);
+cancelTripSettlementBtn.addEventListener("click", closeTripSettlementPanel);
 dateRangeBtn.addEventListener("click", (event) => toggleCalendarPanel(event, "export"));
 detailDateRangeBtn.addEventListener("click", (event) => toggleCalendarPanel(event, "detail"));
 calendarPrevBtn.addEventListener("click", () => shiftCalendarMonth(-1));
@@ -234,13 +320,16 @@ form.addEventListener("submit", async (event) => {
     return;
   }
 
-  if (editingRecordId) {
-    const existingRecord = records.find((item) => item.id === editingRecordId);
-    if (!existingRecord) {
-      cancelEdit();
-      return;
-    }
+  const existingRecord = editingRecordId ? records.find((item) => item.id === editingRecordId) : null;
+  if (editingRecordId && !existingRecord) {
+    cancelEdit();
+    return;
+  }
 
+  const tripAssociation = getEntryTripAssociation(existingRecord);
+  if (!tripAssociation) return;
+
+  if (editingRecordId) {
     const updatedRecord = {
       ...existingRecord,
       type: activeType,
@@ -250,7 +339,8 @@ form.addEventListener("submit", async (event) => {
       major: majorSelect.value,
       minor: minorSelect.value,
       note: noteInput.value.trim(),
-      date: entryDateInput.value
+      date: entryDateInput.value,
+      ...tripAssociation
     };
 
     records = records.map((item) => (item.id === editingRecordId ? updatedRecord : item));
@@ -265,7 +355,7 @@ form.addEventListener("submit", async (event) => {
   }
 
   const record = {
-    id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+    id: createUuid(),
     type: activeType,
     person: personSelect.value,
     amount: Math.round(amount * 100) / 100,
@@ -275,7 +365,8 @@ form.addEventListener("submit", async (event) => {
     note: noteInput.value.trim(),
     date: entryDateInput.value,
     createdAt: new Date().toISOString(),
-    createdBy: currentUser?.id || ""
+    createdBy: currentUser?.id || "",
+    ...tripAssociation
   };
 
   records.unshift(record);
@@ -289,7 +380,13 @@ form.addEventListener("submit", async (event) => {
 });
 
 document.querySelector("#exportBtn").addEventListener("click", () => {
-  const blob = new Blob([JSON.stringify(records, null, 2)], { type: "application/json" });
+  const backup = {
+    version: 2,
+    exportedAt: new Date().toISOString(),
+    records,
+    trips
+  };
+  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
   downloadBlob(blob, `家庭记账-${getShanghaiDay()}.json`);
 });
 
@@ -301,11 +398,19 @@ document.querySelector("#importFile").addEventListener("change", async (event) =
 
   try {
     const imported = JSON.parse(await file.text());
-    if (!Array.isArray(imported)) throw new Error("Invalid data");
-    records = migrateRecords(imported.filter(isRecord));
+    if (Array.isArray(imported)) {
+      records = migrateRecords(imported.filter(isRecord));
+    } else if (imported && Array.isArray(imported.records) && Array.isArray(imported.trips)) {
+      records = migrateRecords(imported.records.filter(isRecord));
+      trips = imported.trips.filter(isTrip).map(normalizeTrip);
+      saveTrips();
+    } else {
+      throw new Error("Invalid data");
+    }
     saveRecords();
     render();
     if (isCloudReady) {
+      await uploadMissingLocalTrips();
       await uploadMissingLocalRecords();
       await syncCloudRecords();
     }
@@ -317,12 +422,16 @@ document.querySelector("#importFile").addEventListener("change", async (event) =
 });
 
 document.querySelector("#clearBtn").addEventListener("click", async () => {
-  if (!records.length && !isCloudReady) return;
-  const storageSize = getLocalStorageSize();
+  if (!records.length && !trips.length && !isCloudReady) return;
+  const storageSize = getLedgerStorageSize();
   const sizeLabel = storageSize ? `\n当前本地数据约 ${formatBytes(storageSize)}。` : "";
-  const countLabel = records.length ? `全部 ${records.length} 条` : "全部";
+  const linkedExpenseCount = records.filter(isTripExpenseRecord).length;
+  const dailyRecordCount = records.length - linkedExpenseCount;
+  const visibleTripCount = trips.filter((trip) => !trip.deletedAt).length;
+  const deletedTripCount = trips.length - visibleTripCount;
+  const countLabel = `日常记录 ${dailyRecordCount} 条、出差费用 ${linkedExpenseCount} 条、出差项目 ${visibleTripCount} 个${deletedTripCount ? `、已删除编号留档 ${deletedTripCount} 个` : ""}`;
   const captcha = createCaptchaCode();
-  const answer = prompt(`确定清空当前账本的${countLabel}记账记录吗？${sizeLabel}\n\n这个操作会清空本地记录；如果已登录同步，也会清空云端数据库记录。\n\n请输入验证码 ${captcha} 后继续：`);
+  const answer = prompt(`确定清空当前账本的全部数据吗？\n${countLabel}${sizeLabel}\n\n这个操作会清空本地的日常账目、出差费用和出差项目；如果已登录同步，也会清空云端对应数据。\n\n请输入验证码 ${captcha} 后继续：`);
   if (answer === null) return;
   if (answer.trim().toLowerCase() !== captcha.toLowerCase()) {
     alert("验证码不一致，已取消清空。");
@@ -335,10 +444,19 @@ document.querySelector("#clearBtn").addEventListener("click", async () => {
       setCloudState("同步失败", error.message);
       return;
     }
+    const { error: tripError } = await supabaseClient.from("business_trips").delete().eq("family_id", familyId);
+    if (tripError) {
+      await uploadMissingLocalRecords();
+      setCloudState("出差项目清空失败", formatCloudSchemaError(tripError));
+      return;
+    }
   }
 
   records = [];
+  trips = [];
+  activeTripId = "";
   saveRecords();
+  saveTrips();
   render();
   updateAuthUi();
 });
@@ -524,20 +642,20 @@ async function getRecordsForExport(startDate, endDate) {
   if (isCloudReady) {
     const { data, error } = await supabaseClient
       .from("records")
-      .select("id,type,person,amount,benefit,major,minor,note,spent_on,created_at,created_by")
+      .select(cloudRecordFields)
       .eq("family_id", familyId)
       .gte("spent_on", startDate)
       .lte("spent_on", endDate)
       .order("spent_on", { ascending: true });
 
     if (!error) {
-      return data.map(fromCloudRecord).filter(isRecord);
+      return data.map(fromCloudRecord).filter(isRecord).filter(isDailyRecord);
     }
 
-    setCloudState("导出读取云端失败", "已改用本机记录导出。");
+    setCloudState("导出读取云端失败", `${formatCloudSchemaError(error)}；已改用本机记录导出。`);
   }
 
-  return records.filter((record) => {
+  return records.filter(isDailyRecord).filter((record) => {
     const day = getRecordDay(record);
     return day >= startDate && day <= endDate;
   });
@@ -550,6 +668,7 @@ function resetForm() {
   benefitSelect.value = getDefaultBenefit();
   syncBenefitField();
   fillMajorCategories();
+  syncTripProjectField();
 }
 
 function switchPage(pageName) {
@@ -575,6 +694,7 @@ function fillMajorCategories() {
     .map((name) => `<option value="${name}">${displayCategory(name)}</option>`)
     .join("");
   fillMinorCategories();
+  syncTripProjectField();
 }
 
 function fillMinorCategories() {
@@ -582,6 +702,73 @@ function fillMinorCategories() {
   minorSelect.innerHTML = minors
     .map((name) => `<option value="${name}">${displayMinor(name)}</option>`)
     .join("");
+}
+
+function fillTripProjectOptions(preferredTripId = "") {
+  const availableTrips = trips
+    .filter((trip) => !trip.archivedAt && !trip.deletedAt)
+    .sort((left, right) => (right.startDate || "").localeCompare(left.startDate || ""));
+  tripProjectSelect.innerHTML = [
+    `<option value="">${availableTrips.length ? "请选择出差项目" : "请先新建出差项目"}</option>`,
+    ...availableTrips.map(
+      (trip) => `<option value="${escapeHtml(trip.id)}">${escapeHtml(`${trip.tripNo} · ${trip.subject}`)}</option>`
+    )
+  ].join("");
+  if (preferredTripId && availableTrips.some((trip) => trip.id === preferredTripId)) {
+    tripProjectSelect.value = preferredTripId;
+  }
+}
+
+function syncTripProjectField(preferredTripId = "") {
+  const isTripExpense = activeType === "expense" && majorSelect.value === "出差";
+  tripProjectField.hidden = !isTripExpense;
+  tripProjectSelect.disabled = !isTripExpense;
+  if (!isTripExpense) {
+    tripProjectSelect.value = "";
+    return;
+  }
+  const currentValue = preferredTripId || tripProjectSelect.value;
+  fillTripProjectOptions(currentValue);
+}
+
+function getEntryTripAssociation(existingRecord) {
+  const shouldLinkTrip = activeType === "expense" && majorSelect.value === "出差";
+  if (!shouldLinkTrip) {
+    return {
+      tripId: "",
+      tripRole: "",
+      tripLinkedAt: "",
+      tripOriginalMajor: "",
+      tripOriginalMinor: ""
+    };
+  }
+
+  const trip = trips.find((item) => item.id === tripProjectSelect.value && !item.deletedAt);
+  if (!trip || trip.archivedAt) {
+    alert(trips.some((item) => !item.archivedAt && !item.deletedAt) ? "请选择一个未归档的出差项目。" : "请先到“出差”页面新建出差项目。");
+    tripProjectSelect.focus();
+    return null;
+  }
+
+  const wasLinked = Boolean(existingRecord?.tripId);
+  const originalMajor = wasLinked
+    ? existingRecord.tripOriginalMajor || ""
+    : existingRecord && existingRecord.major !== "出差"
+      ? existingRecord.major
+      : "";
+  const originalMinor = wasLinked
+    ? existingRecord.tripOriginalMinor || ""
+    : existingRecord && existingRecord.major !== "出差"
+      ? existingRecord.minor
+      : "";
+
+  return {
+    tripId: trip.id,
+    tripRole: "expense",
+    tripLinkedAt: existingRecord?.tripLinkedAt || new Date().toISOString(),
+    tripOriginalMajor: originalMajor,
+    tripOriginalMinor: originalMinor
+  };
 }
 
 function fillDetailCategories() {
@@ -610,7 +797,8 @@ function clearDetailFilters() {
 function render() {
   const today = getShanghaiDay();
   const monthKey = today.slice(0, 7);
-  const monthRecords = records.filter((record) => getRecordDay(record).slice(0, 7) === monthKey);
+  const dailyRecords = records.filter(isDailyRecord);
+  const monthRecords = dailyRecords.filter((record) => getRecordDay(record).slice(0, 7) === monthKey);
   const visibleRecords = getVisibleDetailRecords();
 
   document.querySelector("#monthLabel").textContent = `今天 ${formatDay(today)}`;
@@ -619,16 +807,17 @@ function render() {
   document.querySelector("#liTotal").textContent = money(sum(monthRecords.filter((record) => record.person === "李逍宇"), "expense"));
   document.querySelector("#xuTotal").textContent = money(sum(monthRecords.filter((record) => record.person === "徐佳丹"), "expense"));
 
-  const dateSortedRecords = sortRecordsBySpentDate(records);
+  const dateSortedRecords = sortRecordsBySpentDate(dailyRecords);
   renderRecordList(recentRecordsList, dateSortedRecords.slice(0, 5), {
     emptyText: "还没有记录，先记一笔。",
     limit: 5
   });
   renderRecordList(allRecordsList, visibleRecords, {
-    emptyText: records.length ? "没有找到匹配记录。" : "还没有记录，先记一笔。",
+    emptyText: dailyRecords.length ? "没有找到匹配记录。" : "还没有日常记录，先记一笔。",
     limit: visibleRecords.length
   });
   detailResultHint.textContent = getDetailResultHint(visibleRecords.length);
+  renderTrips();
 }
 
 function getVisibleDetailRecords() {
@@ -640,7 +829,7 @@ function getVisibleDetailRecords() {
 
   if (startDate && endDate && startDate > endDate) return [];
 
-  const filteredRecords = records.filter((record) => {
+  const filteredRecords = records.filter(isDailyRecord).filter((record) => {
     const day = getRecordDay(record);
     const personMatched = filterPerson.value === "all" || record.person === filterPerson.value;
     const typeMatched = filterType.value === "all" || record.type === filterType.value;
@@ -679,6 +868,652 @@ function sortRecordsBySpentDate(items) {
     const leftCreatedAt = Date.parse(left.createdAt || "") || 0;
     const rightCreatedAt = Date.parse(right.createdAt || "") || 0;
     return rightCreatedAt - leftCreatedAt;
+  });
+}
+
+function startNewTrip() {
+  editingTripId = "";
+  tripForm.reset();
+  tripFormTitle.textContent = "新建出差";
+  tripTravelerSelect.disabled = false;
+  tripTravelerSelect.value = getDefaultPerson();
+  tripStartDateInput.value = getShanghaiDay();
+  tripEndDateInput.value = "";
+  tripDailyAllowanceInput.value = "0";
+  tripStatusSelect.value = "ongoing";
+  updateGeneratedTripNumber();
+  tripFormPanel.hidden = false;
+  tripSubjectInput.focus();
+  tripFormPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function startEditTrip(tripId) {
+  const trip = trips.find((item) => item.id === tripId && !item.deletedAt);
+  if (!trip) return;
+  if (trip.archivedAt) {
+    alert("已归档项目为只读。如需修改，请先撤销归档。");
+    return;
+  }
+
+  editingTripId = trip.id;
+  tripFormTitle.textContent = "编辑出差项目";
+  tripTravelerSelect.disabled = true;
+  tripTravelerSelect.value = trip.traveler;
+  tripNumberInput.value = trip.tripNo;
+  tripSubjectInput.value = trip.subject;
+  tripDestinationInput.value = trip.destination;
+  tripStartDateInput.value = trip.startDate;
+  tripEndDateInput.value = trip.endDate || "";
+  tripDailyAllowanceInput.value = trip.dailyAllowance;
+  tripStatusSelect.value = trip.status;
+  tripFormPanel.hidden = false;
+  tripFormPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function closeTripForm() {
+  editingTripId = "";
+  tripTravelerSelect.disabled = false;
+  tripForm.reset();
+  tripFormPanel.hidden = true;
+}
+
+function updateGeneratedTripNumber() {
+  if (editingTripId) return;
+  tripNumberInput.value = generateTripNumber(tripTravelerSelect.value, tripStartDateInput.value);
+}
+
+function generateTripNumber(traveler, startDate) {
+  const prefix = tripNumberPrefixes[traveler];
+  const monthKey = String(startDate || "").slice(0, 7);
+  if (!prefix || !/^\d{4}-\d{2}$/.test(monthKey)) return "";
+  const tripNumberPrefix = `${prefix}-${monthKey}-`;
+  const maxSequence = trips.reduce((currentMax, trip) => {
+    if (!trip.tripNo.startsWith(tripNumberPrefix)) return currentMax;
+    const sequence = Number.parseInt(trip.tripNo.slice(tripNumberPrefix.length), 10);
+    return Number.isFinite(sequence) ? Math.max(currentMax, sequence) : currentMax;
+  }, 0);
+  return `${tripNumberPrefix}${String(maxSequence + 1).padStart(3, "0")}`;
+}
+
+async function saveTripFromForm(event) {
+  event.preventDefault();
+  const dailyAllowance = Number.parseFloat(String(tripDailyAllowanceInput.value || "0").replace(",", "."));
+  const status = tripStatusSelect.value;
+  const startDate = tripStartDateInput.value;
+  const endDate = tripEndDateInput.value;
+
+  if (!tripSubjectInput.value.trim() || !tripDestinationInput.value.trim() || !startDate) {
+    alert("请填写出差事项、目的地和出发日期。");
+    return;
+  }
+  if (!Number.isFinite(dailyAllowance) || dailyAllowance < 0) {
+    alert("每日补贴不能小于 0。");
+    tripDailyAllowanceInput.focus();
+    return;
+  }
+  if (endDate && endDate < startDate) {
+    alert("结束日期不能早于出发日期。");
+    return;
+  }
+  if (status !== "ongoing" && !endDate) {
+    alert("项目结束后必须填写结束日期。");
+    tripEndDateInput.focus();
+    return;
+  }
+
+  const existingTrip = editingTripId ? trips.find((item) => item.id === editingTripId && !item.deletedAt) : null;
+  if (editingTripId && (!existingTrip || existingTrip.archivedAt)) {
+    closeTripForm();
+    return;
+  }
+  if (existingTrip && startDate.slice(0, 7) !== existingTrip.startDate.slice(0, 7)) {
+    alert("出差编号生成后月份不再变化；如需改到其他月份，请删除项目后重新新建。");
+    return;
+  }
+  const tripNo = existingTrip?.tripNo || generateTripNumber(tripTravelerSelect.value, startDate);
+  if (!tripNo || trips.some((trip) => trip.tripNo === tripNo && trip.id !== existingTrip?.id)) {
+    alert("出差编号生成冲突，请先同步后再试。");
+    return;
+  }
+
+  const now = new Date().toISOString();
+  let trip = normalizeTrip({
+    ...existingTrip,
+    id: existingTrip?.id || createUuid(),
+    tripNo,
+    traveler: tripTravelerSelect.value,
+    subject: tripSubjectInput.value.trim(),
+    destination: tripDestinationInput.value.trim(),
+    startDate,
+    endDate,
+    dailyAllowance: roundMoney(dailyAllowance),
+    status,
+    createdAt: existingTrip?.createdAt || now,
+    updatedAt: now,
+    createdBy: existingTrip?.createdBy || currentUser?.id || ""
+  });
+
+  if (existingTrip) {
+    trips = trips.map((item) => (item.id === trip.id ? trip : item));
+  } else {
+    trips = [trip, ...trips];
+  }
+  activeTripId = trip.id;
+  saveTrips();
+  closeTripForm();
+  render();
+  if (isCloudReady) {
+    let saved = await saveCloudTrip(trip);
+    let retryCount = 0;
+    while (!saved && !existingTrip && lastCloudTripError?.code === "23505" && retryCount < 5) {
+      retryCount += 1;
+      trip = normalizeTrip({ ...trip, tripNo: incrementTripNumber(trip.tripNo), updatedAt: new Date().toISOString() });
+      trips = trips.map((item) => (item.id === trip.id ? trip : item));
+      saveTrips();
+      render();
+      saved = await saveCloudTrip(trip);
+    }
+    if (!saved && lastCloudTripError?.code === "23505") {
+      alert("云端同时创建了多个同月项目，编号仍有冲突。请先同步后再新建。");
+    }
+  }
+}
+
+function incrementTripNumber(tripNo) {
+  const match = String(tripNo).match(/^(.*-)(\d{3})$/);
+  if (!match) return tripNo;
+  return `${match[1]}${String(Number(match[2]) + 1).padStart(3, "0")}`;
+}
+
+function renderTrips() {
+  const counts = {
+    ongoing: trips.filter((trip) => !trip.deletedAt && !trip.archivedAt && trip.status === "ongoing").length,
+    pending: trips.filter((trip) => !trip.deletedAt && !trip.archivedAt && trip.status === "pending").length,
+    reimbursed: trips.filter((trip) => !trip.deletedAt && !trip.archivedAt && trip.status === "reimbursed").length,
+    archived: trips.filter((trip) => !trip.deletedAt && Boolean(trip.archivedAt)).length
+  };
+  tripOngoingCount.textContent = counts.ongoing;
+  tripPendingCount.textContent = counts.pending;
+  tripReimbursedCount.textContent = counts.reimbursed;
+  tripArchivedCount.textContent = counts.archived;
+
+  const filterValue = tripStatusFilter.value || "all";
+  const visibleTrips = trips
+    .filter((trip) => {
+      if (trip.deletedAt) return false;
+      if (filterValue === "all") return true;
+      if (filterValue === "archived") return Boolean(trip.archivedAt);
+      return !trip.archivedAt && trip.status === filterValue;
+    })
+    .sort((left, right) => {
+      if (Boolean(left.archivedAt) !== Boolean(right.archivedAt)) return left.archivedAt ? 1 : -1;
+      return (right.startDate || "").localeCompare(left.startDate || "") || (right.createdAt || "").localeCompare(left.createdAt || "");
+    });
+
+  tripProjectList.innerHTML = visibleTrips.length
+    ? visibleTrips
+        .map((trip) => {
+          const totals = getTripTotals(trip);
+          const statusText = trip.archivedAt ? "已归档" : tripStatusLabels[trip.status];
+          return `
+            <article class="trip-card ${trip.id === activeTripId ? "active" : ""}">
+              <button class="trip-card-main" type="button" data-trip-action="open" data-trip-id="${escapeHtml(trip.id)}">
+                <span class="trip-card-top"><strong>${escapeHtml(trip.tripNo)}</strong><em class="trip-status status-${escapeHtml(trip.archivedAt ? "archived" : trip.status)}">${escapeHtml(statusText)}</em></span>
+                <span class="trip-card-title">${escapeHtml(trip.subject)}</span>
+                <span class="trip-card-meta">${escapeHtml(trip.destination)} · ${escapeHtml(formatTripDateRange(trip))}</span>
+                <span class="trip-card-total">费用 ${money(totals.expenseTotal)}</span>
+              </button>
+            </article>`;
+        })
+        .join("")
+    : `<div class="empty-state">${trips.some((trip) => !trip.deletedAt) ? "没有符合筛选条件的出差项目。" : "还没有出差项目，可以先新建一次出差。"}</div>`;
+
+  if (activeTripId && !trips.some((trip) => trip.id === activeTripId && !trip.deletedAt)) activeTripId = "";
+  renderActiveTripDetail();
+  fillTripProjectOptions(tripProjectSelect.value);
+}
+
+function renderActiveTripDetail() {
+  const trip = trips.find((item) => item.id === activeTripId && !item.deletedAt);
+  if (!trip) {
+    tripDetailPanel.hidden = true;
+    closeTripAssignPanel();
+    closeTripSettlementPanel();
+    return;
+  }
+
+  const totals = getTripTotals(trip);
+  const statusText = trip.archivedAt ? "已归档" : tripStatusLabels[trip.status];
+  const settlementDescription = trip.archivedAt
+    ? `<div><span>实际到账</span><strong>${money(trip.reimbursementAmount)}</strong></div><div><span>${trip.surplusAtArchive >= 0 ? "结余收入" : "未报销支出"}</span><strong>${money(Math.abs(trip.surplusAtArchive))}</strong></div>`
+    : "";
+  tripDetailContent.innerHTML = `
+    <div class="trip-detail-heading">
+      <div>
+        <span class="trip-number">${escapeHtml(trip.tripNo)}</span>
+        <h2>${escapeHtml(trip.subject)}</h2>
+        <p>${escapeHtml(trip.destination)} · ${escapeHtml(formatTripDateRange(trip))} · ${escapeHtml(trip.traveler)}</p>
+      </div>
+      <span class="trip-status status-${escapeHtml(trip.archivedAt ? "archived" : trip.status)}">${escapeHtml(statusText)}</span>
+    </div>
+    <div class="trip-detail-summary">
+      <div><span>费用合计</span><strong>${money(totals.expenseTotal)}</strong></div>
+      <div><span>出差天数</span><strong>${totals.days ? `${totals.days} 天` : "待结束"}</strong></div>
+      <div><span>预计补贴</span><strong>${money(totals.allowanceTotal)}</strong></div>
+      ${settlementDescription}
+    </div>
+    <div class="trip-detail-actions">
+      ${trip.archivedAt ? "" : `<button type="button" data-trip-action="add-expense">记一笔出差费用</button><button type="button" data-trip-action="assign">归入已有费用</button><button type="button" data-trip-action="edit">编辑项目与状态</button>`}
+      <button type="button" data-trip-action="export">导出报销汇总</button>
+      ${!trip.archivedAt && trip.status === "reimbursed" ? `<button class="primary-action" type="button" data-trip-action="archive">结算并归档</button>` : ""}
+      ${trip.archivedAt ? `<button type="button" data-trip-action="undo-archive">撤销归档</button>` : `<button class="danger-action" type="button" data-trip-action="delete">删除项目</button>`}
+    </div>`;
+
+  const expenses = sortRecordsBySpentDate(getTripExpenses(trip.id));
+  renderRecordList(tripExpenseList, expenses, {
+    emptyText: "这个项目还没有费用记录。",
+    limit: expenses.length,
+    tripMode: true,
+    readOnly: Boolean(trip.archivedAt)
+  });
+  tripDetailPanel.hidden = false;
+}
+
+function handleTripProjectAction(event) {
+  const button = event.target.closest("[data-trip-action]");
+  if (!button || button.dataset.tripAction !== "open") return;
+  activeTripId = button.dataset.tripId;
+  closeTripAssignPanel();
+  closeTripSettlementPanel();
+  renderTrips();
+  tripDetailPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function handleTripDetailAction(event) {
+  const button = event.target.closest("[data-trip-action]");
+  if (!button) return;
+  const trip = trips.find((item) => item.id === activeTripId && !item.deletedAt);
+  if (!trip) return;
+
+  const action = button.dataset.tripAction;
+  if (action === "add-expense") startTripExpenseEntry(trip);
+  if (action === "assign") openTripAssignPanel(trip);
+  if (action === "edit") startEditTrip(trip.id);
+  if (action === "export") exportTripReimbursement(trip);
+  if (action === "archive") openTripSettlementPanel(trip);
+  if (action === "undo-archive") undoTripArchive(trip);
+  if (action === "delete") deleteTrip(trip);
+}
+
+function startTripExpenseEntry(trip) {
+  if (!trip || trip.archivedAt) return;
+  setActiveType("expense");
+  majorSelect.value = "出差";
+  fillMinorCategories();
+  syncTripProjectField(trip.id);
+  tripProjectSelect.value = trip.id;
+  switchPage("entry");
+  form.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function openTripAssignPanel(trip) {
+  if (!trip || trip.archivedAt) return;
+  const eligibleRecords = sortRecordsBySpentDate(
+    records.filter((record) => record.type === "expense" && !record.tripId && isDailyRecord(record))
+  );
+  tripUnassignedList.innerHTML = eligibleRecords.length
+    ? eligibleRecords
+        .map(
+          (record) => `
+            <label class="trip-assign-record">
+              <input type="checkbox" value="${escapeHtml(record.id)}" />
+              <span><strong>${escapeHtml(`${displayCategory(record.major)} / ${displayMinor(record.minor)}`)}</strong><small>${escapeHtml(`${formatDay(getRecordDay(record))} · ${record.note || "无备注"}`)}</small></span>
+              <b>${money(record.amount)}</b>
+            </label>`
+        )
+        .join("")
+    : `<div class="empty-state">没有可以归入的日常支出。</div>`;
+  tripAssignMinor.value = "出差交通";
+  tripAssignPanel.hidden = false;
+  closeTripSettlementPanel();
+  tripAssignPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function closeTripAssignPanel() {
+  tripAssignPanel.hidden = true;
+  tripUnassignedList.innerHTML = "";
+}
+
+async function assignSelectedRecordsToTrip() {
+  const trip = trips.find((item) => item.id === activeTripId && !item.deletedAt);
+  if (!trip || trip.archivedAt) return;
+  const selectedIds = new Set(
+    Array.from(tripUnassignedList.querySelectorAll('input[type="checkbox"]:checked')).map((input) => input.value)
+  );
+  if (!selectedIds.size) {
+    alert("请至少选择一笔费用。");
+    return;
+  }
+
+  const linkedAt = new Date().toISOString();
+  const changedRecords = [];
+  records = records.map((record) => {
+    if (!selectedIds.has(record.id) || record.tripId || record.type !== "expense") return record;
+    const updatedRecord = {
+      ...record,
+      tripId: trip.id,
+      tripRole: "expense",
+      tripLinkedAt: linkedAt,
+      tripOriginalMajor: record.major,
+      tripOriginalMinor: record.minor,
+      major: "出差",
+      minor: tripAssignMinor.value
+    };
+    changedRecords.push(updatedRecord);
+    return updatedRecord;
+  });
+  saveRecords();
+  closeTripAssignPanel();
+  render();
+  if (isCloudReady && changedRecords.length) await saveCloudRecords(changedRecords);
+}
+
+async function unlinkRecordFromTrip(recordId) {
+  const record = records.find((item) => item.id === recordId);
+  const trip = trips.find((item) => item.id === record?.tripId);
+  if (!record || record.tripRole !== "expense" || trip?.archivedAt) return;
+  if (!confirm("确定将这笔费用移回日常账本吗？")) return;
+
+  const updatedRecord = {
+    ...record,
+    major: record.tripOriginalMajor || record.major,
+    minor: record.tripOriginalMinor || record.minor,
+    tripId: "",
+    tripRole: "",
+    tripLinkedAt: "",
+    tripOriginalMajor: "",
+    tripOriginalMinor: ""
+  };
+  records = records.map((item) => (item.id === recordId ? updatedRecord : item));
+  saveRecords();
+  render();
+  if (isCloudReady) await saveCloudRecord(updatedRecord);
+}
+
+async function deleteTrip(trip) {
+  if (!trip || trip.archivedAt) return;
+  const expenses = getTripExpenses(trip.id);
+  const message = expenses.length
+    ? `确定删除 ${trip.tripNo} 吗？\n\n项目中的 ${expenses.length} 笔费用不会删除，会解除关联并回到日常账本。`
+    : `确定删除 ${trip.tripNo} 吗？`;
+  if (!confirm(message)) return;
+
+  const changedRecords = [];
+  records = records.map((record) => {
+    if (record.tripId !== trip.id || record.tripRole !== "expense") return record;
+    const updatedRecord = {
+      ...record,
+      major: record.tripOriginalMajor || record.major,
+      minor: record.tripOriginalMinor || record.minor,
+      tripId: "",
+      tripRole: "",
+      tripLinkedAt: "",
+      tripOriginalMajor: "",
+      tripOriginalMinor: ""
+    };
+    changedRecords.push(updatedRecord);
+    return updatedRecord;
+  });
+
+  const deletedTrip = normalizeTrip({ ...trip, deletedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+  if (isCloudReady && changedRecords.length && !(await saveCloudRecords(changedRecords))) return;
+  if (isCloudReady && !(await saveCloudTrip(deletedTrip))) return;
+  trips = trips.map((item) => (item.id === trip.id ? deletedTrip : item));
+  activeTripId = "";
+  saveRecords();
+  saveTrips();
+  render();
+}
+
+function getTripExpenses(tripId) {
+  return records.filter((record) => record.tripId === tripId && record.tripRole === "expense");
+}
+
+function getTripSettlementRecord(tripId) {
+  return records.find((record) => record.tripId === tripId && record.tripRole === "settlement") || null;
+}
+
+function getTripDays(trip) {
+  if (!trip?.startDate || !trip?.endDate || trip.endDate < trip.startDate) return 0;
+  const start = Date.parse(`${trip.startDate}T00:00:00Z`);
+  const end = Date.parse(`${trip.endDate}T00:00:00Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
+  return Math.floor((end - start) / 86400000) + 1;
+}
+
+function getTripTotals(trip) {
+  const expenseTotal = roundMoney(getTripExpenses(trip.id).reduce((total, record) => total + record.amount, 0));
+  const days = getTripDays(trip);
+  const allowanceTotal = roundMoney(days * Number(trip.dailyAllowance || 0));
+  return { expenseTotal, days, allowanceTotal };
+}
+
+function formatTripDateRange(trip) {
+  return `${formatDay(trip.startDate)} 至 ${trip.endDate ? formatDay(trip.endDate) : "待定"}`;
+}
+
+function exportTripReimbursement(trip) {
+  if (trip.status === "ongoing" && !trip.archivedAt) {
+    alert("项目结束后再导出报销汇总。请先把状态改为“已结束待报销”。");
+    return;
+  }
+  const expenses = getTripExpenses(trip.id);
+  if (!expenses.length) {
+    alert("这个项目还没有费用，暂时不能导出报销汇总。");
+    return;
+  }
+  const workbookHtml = buildTripExpenseWorkbook(trip, expenses);
+  downloadBlob(
+    new Blob([`\ufeff${workbookHtml}`], { type: "application/vnd.ms-excel;charset=utf-8" }),
+    `出差报销-${safeFileName(trip.tripNo)}-${safeFileName(trip.subject)}.xls`
+  );
+}
+
+function buildTripExpenseWorkbook(trip, expenses) {
+  const totals = getTripTotals(trip);
+  const infoRows = [
+    ["出差编号", trip.tripNo, "出差人", trip.traveler],
+    ["出差事项", trip.subject, "目的地", trip.destination],
+    ["出发日期", trip.startDate, "结束日期", trip.endDate || "待定"],
+    ["出差天数", totals.days ? `${totals.days} 天` : "待结束", "每日补贴", trip.dailyAllowance],
+    ["预计补贴", totals.allowanceTotal, "费用合计", totals.expenseTotal],
+    ["项目状态", trip.archivedAt ? "已归档" : tripStatusLabels[trip.status], "导出时间", formatDateTime(new Date().toISOString())]
+  ];
+  if (trip.archivedAt) {
+    infoRows.push(["实际到账", trip.reimbursementAmount, "到账日期", trip.reimbursedOn]);
+    infoRows.push([trip.surplusAtArchive >= 0 ? "结余收入" : "未报销支出", Math.abs(trip.surplusAtArchive), "归档时间", formatDateTime(trip.archivedAt)]);
+  }
+
+  const summaryRows = tripExpenseGroups.map((group) => {
+    const groupRecords = expenses.filter((record) => record.minor === group.minor);
+    return [group.label, String(groupRecords.length), roundMoney(groupRecords.reduce((total, record) => total + record.amount, 0))];
+  });
+  summaryRows.push(["合计", String(expenses.length), totals.expenseTotal]);
+
+  const detailsHtml = tripExpenseGroups
+    .map((group) => {
+      const groupRecords = expenses
+        .filter((record) => record.minor === group.minor)
+        .sort((left, right) => getRecordDay(left).localeCompare(getRecordDay(right)) || (left.createdAt || "").localeCompare(right.createdAt || ""));
+      const groupTotal = roundMoney(groupRecords.reduce((total, record) => total + record.amount, 0));
+      const rows = groupRecords.length
+        ? groupRecords
+            .map(
+              (record, index) => `<tr><td>${index + 1}</td><td>${formatExcelValue(getRecordDay(record))}</td><td>${formatExcelValue(group.label)}</td><td class="number">${formatExcelValue(record.amount)}</td><td>${formatExcelValue(displayPerson(record.person))}</td><td>${formatExcelValue(record.note || "")}</td></tr>`
+            )
+            .join("")
+        : `<tr><td colspan="6">无记录</td></tr>`;
+      return `<h2>${formatExcelValue(group.label)}</h2><table><thead><tr><th>序号</th><th>消费日期</th><th>费用类别</th><th>金额</th><th>记账人</th><th>备注</th></tr></thead><tbody>${rows}<tr class="subtotal"><td colspan="3">${formatExcelValue(group.label)}小计</td><td class="number">${formatExcelValue(groupTotal)}</td><td colspan="2"></td></tr></tbody></table>`;
+    })
+    .join("");
+
+  return `<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:"Microsoft YaHei",Arial,sans-serif;color:#222}h1{font-size:22px}h2{margin-top:24px;font-size:17px}table{border-collapse:collapse;width:100%;margin:10px 0 18px}th,td{border:1px solid #8b9893;padding:7px;text-align:left}th{background:#e8f2ed}.number{text-align:right;mso-number-format:"0.00"}.subtotal td,.grand-total td{font-weight:700;background:#f4f7f5}.project-info td:nth-child(odd){font-weight:700;background:#f4f7f5}</style></head><body><h1>出差费用报销汇总</h1><table class="project-info"><tbody>${infoRows.map((row) => `<tr>${row.map((cell) => `<td>${formatExcelValue(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table><h2>费用分类汇总</h2><table><thead><tr><th>类别</th><th>笔数</th><th>金额</th></tr></thead><tbody>${summaryRows.map((row, index) => `<tr class="${index === summaryRows.length - 1 ? "grand-total" : ""}">${row.map((cell, cellIndex) => `<td class="${cellIndex === 2 ? "number" : ""}">${formatExcelValue(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>${detailsHtml}</body></html>`;
+}
+
+function openTripSettlementPanel(trip) {
+  if (!trip || trip.archivedAt || trip.status !== "reimbursed") return;
+  if (!trip.endDate) {
+    alert("归档前必须填写结束日期。");
+    return;
+  }
+  tripReimbursementAmountInput.value = trip.reimbursementAmount || "";
+  tripReimbursedOnInput.value = trip.reimbursedOn || getShanghaiDay();
+  tripSettlementPanel.hidden = false;
+  closeTripAssignPanel();
+  updateTripSettlementPreview();
+  tripSettlementPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function closeTripSettlementPanel() {
+  tripSettlementPanel.hidden = true;
+  tripSettlementForm.reset();
+}
+
+function updateTripSettlementPreview() {
+  const trip = trips.find((item) => item.id === activeTripId && !item.deletedAt);
+  if (!trip) return;
+  const totals = getTripTotals(trip);
+  const reimbursement = Number.parseFloat(String(tripReimbursementAmountInput.value || "0").replace(",", "."));
+  const result = roundMoney((Number.isFinite(reimbursement) ? reimbursement : 0) - totals.expenseTotal);
+  tripSettlementExpense.textContent = money(totals.expenseTotal);
+  tripSettlementAllowance.textContent = money(totals.allowanceTotal);
+  tripSettlementResult.textContent = `${result >= 0 ? "结余收入" : "未报销支出"} ${money(Math.abs(result))}`;
+  tripSettlementResult.classList.toggle("negative", result < 0);
+}
+
+async function archiveActiveTrip(event) {
+  event.preventDefault();
+  const trip = trips.find((item) => item.id === activeTripId && !item.deletedAt);
+  if (!trip || trip.archivedAt || trip.status !== "reimbursed") return;
+  const reimbursementAmount = Number.parseFloat(String(tripReimbursementAmountInput.value).replace(",", "."));
+  const reimbursedOn = tripReimbursedOnInput.value;
+  if (!Number.isFinite(reimbursementAmount) || reimbursementAmount < 0 || !reimbursedOn) {
+    alert("请填写实际到账总额和到账日期。");
+    return;
+  }
+
+  const totals = getTripTotals(trip);
+  const surplus = roundMoney(reimbursementAmount - totals.expenseTotal);
+  const settlementLabel = surplus > 0 ? `生成日常收入 ${money(surplus)}` : surplus < 0 ? `生成日常支出 ${money(Math.abs(surplus))}` : "不生成日常收支记录";
+  if (!confirm(`请确认 ${trip.tripNo} 的结算：\n\n费用合计：${money(totals.expenseTotal)}\n实际到账：${money(reimbursementAmount)}\n${settlementLabel}\n\n归档后项目将只读。`)) return;
+
+  const now = new Date().toISOString();
+  const existingSettlement = getTripSettlementRecord(trip.id);
+  let settlementRecord = null;
+  if (surplus !== 0) {
+    settlementRecord = {
+      ...(existingSettlement || {}),
+      id: existingSettlement?.id || createUuid(),
+      type: surplus > 0 ? "income" : "expense",
+      person: trip.traveler,
+      amount: Math.abs(surplus),
+      benefit: surplus > 0 ? "" : `${trip.traveler}用`,
+      major: surplus > 0 ? "报销" : "其他",
+      minor: surplus > 0 ? "出差结余" : "出差未报销",
+      note: `${trip.tripNo} ${trip.subject} ${surplus > 0 ? "出差结余" : "出差未报销"}`,
+      date: reimbursedOn,
+      createdAt: existingSettlement?.createdAt || now,
+      createdBy: existingSettlement?.createdBy || currentUser?.id || "",
+      tripId: trip.id,
+      tripRole: "settlement",
+      tripLinkedAt: existingSettlement?.tripLinkedAt || now,
+      tripOriginalMajor: "",
+      tripOriginalMinor: ""
+    };
+  }
+
+  if (existingSettlement && !settlementRecord) {
+    records = records.filter((record) => record.id !== existingSettlement.id);
+  } else if (existingSettlement && settlementRecord) {
+    records = records.map((record) => (record.id === existingSettlement.id ? settlementRecord : record));
+  } else if (settlementRecord) {
+    records = [settlementRecord, ...records];
+  }
+
+  const archivedTrip = normalizeTrip({
+    ...trip,
+    reimbursementAmount: roundMoney(reimbursementAmount),
+    reimbursedOn,
+    expenseTotalAtArchive: totals.expenseTotal,
+    allowanceTotalAtArchive: totals.allowanceTotal,
+    surplusAtArchive: surplus,
+    settlementRecordId: settlementRecord?.id || "",
+    archivedAt: now,
+    updatedAt: now
+  });
+  trips = trips.map((item) => (item.id === trip.id ? archivedTrip : item));
+  saveRecords();
+  saveTrips();
+  closeTripSettlementPanel();
+  render();
+
+  if (isCloudReady) {
+    let settlementSaved = true;
+    if (existingSettlement && !settlementRecord) {
+      settlementSaved = await deleteCloudRecord(existingSettlement.id);
+    } else if (settlementRecord) {
+      settlementSaved = await saveCloudRecord(settlementRecord);
+    }
+    if (settlementSaved) await saveCloudTrip(archivedTrip);
+  }
+}
+
+async function undoTripArchive(trip) {
+  if (!trip?.archivedAt) return;
+  if (!confirm(`确定撤销 ${trip.tripNo} 的归档吗？\n系统会删除已生成的结余记录，项目恢复为“已报销”，之后可以重新核对并归档。`)) return;
+  const settlementRecord = getTripSettlementRecord(trip.id);
+  const reopenedTrip = normalizeTrip({
+    ...trip,
+    status: "reimbursed",
+    reimbursementAmount: 0,
+    reimbursedOn: "",
+    expenseTotalAtArchive: 0,
+    allowanceTotalAtArchive: 0,
+    surplusAtArchive: 0,
+    settlementRecordId: "",
+    archivedAt: "",
+    updatedAt: new Date().toISOString()
+  });
+
+  if (isCloudReady) {
+    if (settlementRecord && !(await deleteCloudRecord(settlementRecord.id))) return;
+    if (!(await saveCloudTrip(reopenedTrip))) {
+      if (settlementRecord) await saveCloudRecord(settlementRecord);
+      return;
+    }
+  }
+
+  if (settlementRecord) records = records.filter((record) => record.id !== settlementRecord.id);
+  trips = trips.map((item) => (item.id === trip.id ? reopenedTrip : item));
+  saveRecords();
+  saveTrips();
+  render();
+}
+
+function safeFileName(value) {
+  return String(value || "出差").replace(/[\\/:*?"<>|]/g, "-").slice(0, 60);
+}
+
+function roundMoney(value) {
+  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
+function createUuid() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (token) => {
+    const random = Math.floor(Math.random() * 16);
+    const value = token === "x" ? random : (random & 0x3) | 0x8;
+    return value.toString(16);
   });
 }
 
@@ -1103,6 +1938,7 @@ function applyReceiptResult(result) {
       minorSelect.value = result.minor;
     }
   }
+  syncTripProjectField();
   if (result.note) noteInput.value = result.note;
 
   const filled = [
@@ -1174,7 +2010,7 @@ async function importSelectedReceiptRecords() {
   receiptBatchAddBtn.disabled = true;
   const baseTime = Date.now();
   const importedRecords = selectedItems.map((item, index) => ({
-    id: crypto.randomUUID ? crypto.randomUUID() : `${baseTime}-${index}-${Math.random()}`,
+    id: createUuid(),
     type: item.type,
     person: personSelect.value,
     amount: Math.round(item.amount * 100) / 100,
@@ -1221,6 +2057,18 @@ function renderRecordList(listNode, items, options = {}) {
     const moneyNode = node.querySelector(".record-money");
     moneyNode.textContent = `${record.type === "income" ? "+" : "-"}${money(record.amount)}`;
     moneyNode.classList.toggle("income", record.type === "income");
+    const actionsNode = node.querySelector(".record-actions");
+    if (options.readOnly) {
+      actionsNode.innerHTML = `<span class="record-lock">已归档</span>`;
+    } else if (record.tripRole === "settlement") {
+      actionsNode.innerHTML = `<span class="record-lock">项目结算</span>`;
+    } else if (options.tripMode) {
+      const unlinkButton = document.createElement("button");
+      unlinkButton.type = "button";
+      unlinkButton.className = "record-trip-unlink";
+      unlinkButton.textContent = "移回日常";
+      actionsNode.appendChild(unlinkButton);
+    }
     listNode.appendChild(node);
   });
 }
@@ -1282,6 +2130,10 @@ async function handleRecordAction(event) {
   if (!actionButton || !itemNode) return;
 
   const recordId = itemNode.dataset.recordId;
+  if (actionButton.classList.contains("record-trip-unlink")) {
+    await unlinkRecordFromTrip(recordId);
+    return;
+  }
   if (actionButton.classList.contains("record-edit")) {
     startEdit(recordId);
     return;
@@ -1295,6 +2147,15 @@ async function handleRecordAction(event) {
 function startEdit(recordId) {
   const record = records.find((item) => item.id === recordId);
   if (!record) return;
+  if (record.tripRole === "settlement") {
+    alert("这是出差项目自动生成的结算记录，请到对应项目撤销归档后重新结算。");
+    return;
+  }
+  const linkedTrip = trips.find((trip) => trip.id === record.tripId);
+  if (linkedTrip?.archivedAt) {
+    alert("已归档项目的费用不能编辑。如需修改，请先撤销归档。");
+    return;
+  }
 
   editingRecordId = recordId;
   setActiveType(record.type);
@@ -1305,6 +2166,8 @@ function startEdit(recordId) {
   majorSelect.value = record.major;
   fillMinorCategories();
   minorSelect.value = record.minor;
+  syncTripProjectField(record.tripId || "");
+  if (record.tripId) tripProjectSelect.value = record.tripId;
   noteInput.value = record.note || "";
   submitEntryBtn.textContent = "保存修改";
   cancelEditBtn.hidden = false;
@@ -1323,6 +2186,15 @@ function cancelEdit() {
 async function deleteRecord(recordId) {
   const record = records.find((item) => item.id === recordId);
   if (!record) return;
+  if (record.tripRole === "settlement") {
+    alert("项目结算记录不能直接删除，请到出差项目撤销归档。");
+    return;
+  }
+  const linkedTrip = trips.find((trip) => trip.id === record.tripId);
+  if (linkedTrip?.archivedAt) {
+    alert("已归档项目的费用不能删除。如需修改，请先撤销归档。");
+    return;
+  }
   if (!confirm(`确定删除这条记录吗？\n${displayCategory(record.major)} / ${displayMinor(record.minor)} ${money(record.amount)}`)) return;
 
   records = records.filter((item) => item.id !== recordId);
@@ -1336,7 +2208,7 @@ async function deleteRecord(recordId) {
       setCloudState("删除云端记录失败", "本机已删除，稍后点“同步”会重新拉取云端记录。");
       return;
     }
-    setCloudState("云同步已开启", `${currentUser.email} · ${records.length} 条记录`);
+    setCloudState("云同步已开启", `${currentUser.email} · ${getLedgerCountLabel()}`);
   }
 }
 
@@ -1372,7 +2244,7 @@ function updateAuthUi() {
   syncBtn.disabled = !supabaseClient;
 
   if (isCloudReady) {
-    setCloudState("云同步已开启", `${currentUser.email} · ${records.length} 条记录`);
+    setCloudState("云同步已开启", `${currentUser.email} · ${getLedgerCountLabel()}`);
   } else if (supabaseClient) {
     setCloudState("待登录", "输入 Supabase 用户邮箱和密码后即可同步。");
   } else {
@@ -1449,51 +2321,107 @@ async function syncCloudRecords() {
   }
 
   setCloudState("正在同步", "正在读取云端账本。");
-  await uploadMissingLocalRecords();
+  if (!(await uploadMissingLocalTrips())) return;
+  if (!(await uploadMissingLocalRecords())) return;
 
-  const { data, error } = await supabaseClient
-    .from("records")
-    .select("id,type,person,amount,benefit,major,minor,note,spent_on,created_at,created_by")
+  const { data: tripRows, error: tripError } = await supabaseClient
+    .from("business_trips")
+    .select(cloudTripFields)
     .eq("family_id", familyId)
-    .order("created_at", { ascending: false });
-
-  if (error) {
-    setCloudState("同步失败", error.message);
+    .order("start_on", { ascending: false });
+  if (tripError) {
+    setCloudState("出差项目同步失败", formatCloudSchemaError(tripError));
     return;
   }
 
-  const shouldRepairCloudBenefits = data.some((row) => row.benefit === "自己用");
-  const syncedRecords = data.map(fromCloudRecord).filter(isRecord);
+  const { data: recordRows, error: recordError } = await supabaseClient
+    .from("records")
+    .select(cloudRecordFields)
+    .eq("family_id", familyId)
+    .order("created_at", { ascending: false });
+
+  if (recordError) {
+    setCloudState("账目同步失败", formatCloudSchemaError(recordError));
+    return;
+  }
+
+  const shouldRepairCloudBenefits = recordRows.some((row) => row.benefit === "自己用");
+  const syncedRecords = recordRows.map(fromCloudRecord).filter(isRecord);
   const migratedRecords = migrateRecords(syncedRecords);
+  trips = tripRows.map(fromCloudTrip).filter(isTrip).map(normalizeTrip);
   records = migratedRecords;
+  if (activeTripId && !trips.some((trip) => trip.id === activeTripId && !trip.deletedAt)) activeTripId = "";
+  saveTrips();
   saveRecords();
   render();
   if (shouldRepairCloudBenefits || hasBenefitMigration(syncedRecords, migratedRecords)) {
     await uploadMissingLocalRecords();
   }
-  setCloudState("云同步已开启", `${currentUser.email} · ${records.length} 条记录`);
+  setCloudState("云同步已开启", `${currentUser.email} · ${getLedgerCountLabel()}`);
 }
 
 async function uploadMissingLocalRecords() {
-  if (!isCloudReady || !records.length) return;
+  if (!isCloudReady || !records.length) return true;
 
   const rows = records.map(toCloudRecord);
   const { error } = await supabaseClient.from("records").upsert(rows, { onConflict: "id" });
   if (error) {
-    setCloudState("上传失败", error.message);
+    setCloudState("账目上传失败", formatCloudSchemaError(error));
+    return false;
   }
+  return true;
 }
 
 async function saveCloudRecord(record) {
+  return saveCloudRecords([record]);
+}
+
+async function saveCloudRecords(recordItems) {
+  if (!isCloudReady || !recordItems.length) return true;
   setCloudState("正在保存", "正在写入云端账本。");
-  const { error } = await supabaseClient.from("records").upsert(toCloudRecord(record), { onConflict: "id" });
+  const { error } = await supabaseClient.from("records").upsert(recordItems.map(toCloudRecord), { onConflict: "id" });
 
   if (error) {
-    setCloudState("保存到云端失败", "已保存在本机，稍后可以点“同步”重试。");
-    return;
+    setCloudState("保存到云端失败", `${formatCloudSchemaError(error)}；已保存在本机，可稍后重试同步。`);
+    return false;
   }
 
-  setCloudState("云同步已开启", `${currentUser.email} · ${records.length} 条记录`);
+  setCloudState("云同步已开启", `${currentUser.email} · ${getLedgerCountLabel()}`);
+  return true;
+}
+
+async function uploadMissingLocalTrips() {
+  if (!isCloudReady || !trips.length) return true;
+  const { error } = await supabaseClient.from("business_trips").upsert(trips.map(toCloudTrip), { onConflict: "id" });
+  if (error) {
+    setCloudState("出差项目上传失败", formatCloudSchemaError(error));
+    return false;
+  }
+  return true;
+}
+
+async function saveCloudTrip(trip) {
+  if (!isCloudReady) return true;
+  lastCloudTripError = null;
+  setCloudState("正在保存", "正在写入出差项目。");
+  const { error } = await supabaseClient.from("business_trips").upsert(toCloudTrip(trip), { onConflict: "id" });
+  if (error) {
+    lastCloudTripError = error;
+    setCloudState("出差项目保存失败", `${formatCloudSchemaError(error)}；已保存在本机，可稍后重试同步。`);
+    return false;
+  }
+  setCloudState("云同步已开启", `${currentUser.email} · ${getLedgerCountLabel()}`);
+  return true;
+}
+
+async function deleteCloudRecord(recordId) {
+  if (!isCloudReady) return true;
+  const { error } = await supabaseClient.from("records").delete().eq("family_id", familyId).eq("id", recordId);
+  if (error) {
+    setCloudState("删除云端记录失败", formatCloudSchemaError(error));
+    return false;
+  }
+  return true;
 }
 
 function toCloudRecord(record) {
@@ -1509,7 +2437,12 @@ function toCloudRecord(record) {
     note: record.note || "",
     spent_on: getRecordDay(record),
     created_at: record.createdAt || new Date().toISOString(),
-    created_by: currentUser.id
+    created_by: currentUser.id,
+    trip_id: record.tripId || null,
+    trip_role: record.tripRole || null,
+    trip_linked_at: record.tripLinkedAt || null,
+    trip_original_major: record.tripOriginalMajor || null,
+    trip_original_minor: record.tripOriginalMinor || null
   };
 }
 
@@ -1525,8 +2458,77 @@ function fromCloudRecord(row) {
     note: row.note || "",
     date: row.spent_on,
     createdAt: row.created_at,
+    createdBy: row.created_by || "",
+    tripId: row.trip_id || "",
+    tripRole: row.trip_role || "",
+    tripLinkedAt: row.trip_linked_at || "",
+    tripOriginalMajor: row.trip_original_major || "",
+    tripOriginalMinor: row.trip_original_minor || ""
+  });
+}
+
+function toCloudTrip(trip) {
+  return {
+    id: trip.id,
+    family_id: familyId,
+    trip_no: trip.tripNo,
+    traveler: trip.traveler,
+    subject: trip.subject,
+    destination: trip.destination,
+    start_on: trip.startDate,
+    end_on: trip.endDate || null,
+    daily_allowance: trip.dailyAllowance,
+    status: trip.status,
+    reimbursement_amount: trip.reimbursementAmount || 0,
+    reimbursed_on: trip.reimbursedOn || null,
+    expense_total_at_archive: trip.expenseTotalAtArchive || 0,
+    allowance_total_at_archive: trip.allowanceTotalAtArchive || 0,
+    surplus_at_archive: trip.surplusAtArchive || 0,
+    settlement_record_id: trip.settlementRecordId || null,
+    archived_at: trip.archivedAt || null,
+    deleted_at: trip.deletedAt || null,
+    created_at: trip.createdAt || new Date().toISOString(),
+    updated_at: trip.updatedAt || new Date().toISOString(),
+    created_by: currentUser.id
+  };
+}
+
+function fromCloudTrip(row) {
+  return normalizeTrip({
+    id: row.id,
+    tripNo: row.trip_no,
+    traveler: row.traveler,
+    subject: row.subject,
+    destination: row.destination,
+    startDate: row.start_on,
+    endDate: row.end_on || "",
+    dailyAllowance: Number(row.daily_allowance || 0),
+    status: row.status,
+    reimbursementAmount: Number(row.reimbursement_amount || 0),
+    reimbursedOn: row.reimbursed_on || "",
+    expenseTotalAtArchive: Number(row.expense_total_at_archive || 0),
+    allowanceTotalAtArchive: Number(row.allowance_total_at_archive || 0),
+    surplusAtArchive: Number(row.surplus_at_archive || 0),
+    settlementRecordId: row.settlement_record_id || "",
+    archivedAt: row.archived_at || "",
+    deletedAt: row.deleted_at || "",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
     createdBy: row.created_by || ""
   });
+}
+
+function formatCloudSchemaError(error) {
+  const message = String(error?.message || "云端操作失败");
+  const lowerMessage = message.toLowerCase();
+  if (lowerMessage.includes("business_trips") || lowerMessage.includes("trip_id") || lowerMessage.includes("trip_role") || lowerMessage.includes("schema cache")) {
+    return "云端还没有出差模块的数据表，请先在 Supabase SQL Editor 重新运行新版 supabase-schema.sql";
+  }
+  return message;
+}
+
+function getLedgerCountLabel() {
+  return `${records.length} 条账目 · ${trips.filter((trip) => !trip.deletedAt).length} 个出差项目`;
 }
 
 function sum(items, type) {
@@ -1633,6 +2635,10 @@ function formatExcelCell(value) {
   return `<td style="mso-number-format:'\\@';">${escapeHtml(value)}</td>`;
 }
 
+function formatExcelValue(value) {
+  return typeof value === "number" ? value.toFixed(2) : escapeHtml(value);
+}
+
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -1650,8 +2656,11 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
-function getLocalStorageSize() {
-  return new Blob([localStorage.getItem(storageKey) || ""]).size;
+function getLedgerStorageSize() {
+  return new Blob([
+    localStorage.getItem(storageKey) || "",
+    localStorage.getItem(tripStorageKey) || ""
+  ]).size;
 }
 
 function formatBytes(bytes) {
@@ -1693,6 +2702,61 @@ function loadRecords() {
 
 function saveRecords() {
   localStorage.setItem(storageKey, JSON.stringify(records));
+}
+
+function loadTrips() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(tripStorageKey) || "[]");
+    return Array.isArray(parsed) ? parsed.filter(isTrip).map(normalizeTrip) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveTrips() {
+  localStorage.setItem(tripStorageKey, JSON.stringify(trips));
+}
+
+function normalizeTrip(trip) {
+  return {
+    ...trip,
+    endDate: trip.endDate || "",
+    dailyAllowance: roundMoney(Number(trip.dailyAllowance || 0)),
+    reimbursementAmount: roundMoney(Number(trip.reimbursementAmount || 0)),
+    reimbursedOn: trip.reimbursedOn || "",
+    expenseTotalAtArchive: roundMoney(Number(trip.expenseTotalAtArchive || 0)),
+    allowanceTotalAtArchive: roundMoney(Number(trip.allowanceTotalAtArchive || 0)),
+    surplusAtArchive: roundMoney(Number(trip.surplusAtArchive || 0)),
+    settlementRecordId: trip.settlementRecordId || "",
+    archivedAt: trip.archivedAt || "",
+    deletedAt: trip.deletedAt || "",
+    updatedAt: trip.updatedAt || trip.createdAt || "",
+    createdBy: trip.createdBy || ""
+  };
+}
+
+function isTrip(trip) {
+  return (
+    trip &&
+    typeof trip.id === "string" &&
+    typeof trip.tripNo === "string" &&
+    people.includes(trip.traveler) &&
+    typeof trip.subject === "string" &&
+    typeof trip.destination === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(trip.startDate) &&
+    (trip.endDate === "" || typeof trip.endDate === "undefined" || /^\d{4}-\d{2}-\d{2}$/.test(trip.endDate)) &&
+    Number.isFinite(Number(trip.dailyAllowance)) &&
+    ["ongoing", "pending", "reimbursed"].includes(trip.status) &&
+    (typeof trip.deletedAt === "string" || typeof trip.deletedAt === "undefined")
+  );
+}
+
+function isTripExpenseRecord(record) {
+  return Boolean(record?.tripId) && record.tripRole === "expense";
+}
+
+function isDailyRecord(record) {
+  return !isTripExpenseRecord(record);
 }
 
 function syncBenefitField() {
@@ -1744,7 +2808,12 @@ function isRecord(record) {
     typeof record.date === "string" &&
     (typeof record.note === "string" || typeof record.note === "undefined") &&
     (typeof record.createdAt === "string" || typeof record.createdAt === "undefined") &&
-    (typeof record.createdBy === "string" || typeof record.createdBy === "undefined")
+    (typeof record.createdBy === "string" || typeof record.createdBy === "undefined") &&
+    (typeof record.tripId === "string" || typeof record.tripId === "undefined") &&
+    (typeof record.tripRole === "string" || typeof record.tripRole === "undefined") &&
+    (typeof record.tripLinkedAt === "string" || typeof record.tripLinkedAt === "undefined") &&
+    (typeof record.tripOriginalMajor === "string" || typeof record.tripOriginalMajor === "undefined") &&
+    (typeof record.tripOriginalMinor === "string" || typeof record.tripOriginalMinor === "undefined")
   );
 }
 
@@ -1758,5 +2827,6 @@ renderCalendar();
 syncBenefitField();
 fillMajorCategories();
 fillDetailCategories();
+fillTripProjectOptions();
 render();
 initCloud();

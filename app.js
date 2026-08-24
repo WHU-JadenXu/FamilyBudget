@@ -157,6 +157,7 @@ let lastCloudTripError = null;
 let cloudSyncPromise = null;
 let lastSuccessfulSyncAt = 0;
 let preferredPerson = localStorage.getItem(`${storageKey}-preferred-person`) || "";
+let detailAmountSortDirection = "";
 
 const form = document.querySelector("#entryForm");
 const amountInput = document.querySelector("#amount");
@@ -175,6 +176,9 @@ const recordLimitSelect = document.querySelector("#recordLimit");
 const filterPerson = document.querySelector("#filterPerson");
 const filterType = document.querySelector("#filterType");
 const filterCategory = document.querySelector("#filterCategory");
+const detailMinAmountInput = document.querySelector("#detailMinAmount");
+const detailMaxAmountInput = document.querySelector("#detailMaxAmount");
+const amountSortBtn = document.querySelector("#amountSortBtn");
 const detailDateRangeBtn = document.querySelector("#detailDateRangeBtn");
 const detailDateRangeText = document.querySelector("#detailDateRangeText");
 const detailStartDateInput = document.querySelector("#detailStartDate");
@@ -278,6 +282,9 @@ recordLimitSelect.addEventListener("change", render);
 filterPerson.addEventListener("change", render);
 filterType.addEventListener("change", render);
 filterCategory.addEventListener("change", render);
+detailMinAmountInput.addEventListener("input", render);
+detailMaxAmountInput.addEventListener("input", render);
+amountSortBtn.addEventListener("click", toggleDetailAmountSort);
 clearDetailFiltersBtn.addEventListener("click", clearDetailFilters);
 searchInput.addEventListener("input", render);
 recentRecordsList.addEventListener("click", handleRecordAction);
@@ -910,11 +917,37 @@ function clearDetailFilters() {
   filterPerson.value = "all";
   filterType.value = "all";
   filterCategory.value = "all";
+  detailMinAmountInput.value = "";
+  detailMaxAmountInput.value = "";
+  detailAmountSortDirection = "";
   detailStartDateInput.value = "";
   detailEndDateInput.value = "";
   searchInput.value = "";
+  updateDetailAmountSortButton();
   updateDetailDateRangeText();
   render();
+}
+
+function toggleDetailAmountSort() {
+  detailAmountSortDirection = detailAmountSortDirection === "desc" ? "asc" : "desc";
+  updateDetailAmountSortButton();
+  render();
+}
+
+function updateDetailAmountSortButton() {
+  const isAmountSorted = Boolean(detailAmountSortDirection);
+  amountSortBtn.dataset.direction = detailAmountSortDirection;
+  amountSortBtn.setAttribute("aria-pressed", String(isAmountSorted));
+  if (detailAmountSortDirection === "desc") {
+    amountSortBtn.textContent = "从大到小 ↓";
+    amountSortBtn.setAttribute("aria-label", "当前金额从大到小，点击改为从小到大");
+  } else if (detailAmountSortDirection === "asc") {
+    amountSortBtn.textContent = "从小到大 ↑";
+    amountSortBtn.setAttribute("aria-label", "当前金额从小到大，点击改为从大到小");
+  } else {
+    amountSortBtn.textContent = "按金额排序";
+    amountSortBtn.setAttribute("aria-label", "点击按金额从大到小排序");
+  }
 }
 
 function render() {
@@ -947,31 +980,54 @@ function getVisibleDetailRecords() {
   const query = searchInput.value.trim().toLowerCase();
   const startDate = detailStartDateInput.value;
   const endDate = detailEndDateInput.value;
+  const amountRange = getDetailAmountRange();
   const hasDateWindow = Boolean(startDate || endDate);
   const limitValue = recordLimitSelect.value;
 
-  if (startDate && endDate && startDate > endDate) return [];
+  if ((startDate && endDate && startDate > endDate) || amountRange.error) return [];
 
   const filteredRecords = records.filter(isDailyRecord).filter((record) => {
     const day = getRecordDay(record);
+    const amount = Number(record.amount);
     const personMatched = filterPerson.value === "all" || record.person === filterPerson.value;
     const typeMatched = filterType.value === "all" || record.type === filterType.value;
     const categoryMatched = filterCategory.value === "all" || record.major === filterCategory.value;
+    const minAmountMatched = amountRange.minAmount === null || amount >= amountRange.minAmount;
+    const maxAmountMatched = amountRange.maxAmount === null || amount <= amountRange.maxAmount;
     const startMatched = !startDate || day >= startDate;
     const endMatched = !endDate || day <= endDate;
     const queryMatched = !query || getRecordSearchText(record).includes(query);
-    return personMatched && typeMatched && categoryMatched && startMatched && endMatched && queryMatched;
+    return personMatched && typeMatched && categoryMatched && minAmountMatched && maxAmountMatched && startMatched && endMatched && queryMatched;
   });
-  const sortedRecords = sortRecordsBySpentDate(filteredRecords);
+  const dateSortedRecords = sortRecordsBySpentDate(filteredRecords);
+  const selectedRecords = hasDateWindow || limitValue === "all" ? dateSortedRecords : dateSortedRecords.slice(0, Number(limitValue));
+  return sortDetailRecords(selectedRecords);
+}
 
-  if (hasDateWindow || limitValue === "all") return sortedRecords;
-  return sortedRecords.slice(0, Number(limitValue));
+function getDetailAmountRange() {
+  const minRaw = detailMinAmountInput.value.trim();
+  const maxRaw = detailMaxAmountInput.value.trim();
+  const minAmount = minRaw === "" ? null : Number(minRaw);
+  const maxAmount = maxRaw === "" ? null : Number(maxRaw);
+
+  if (minAmount !== null && (!Number.isFinite(minAmount) || minAmount < 0)) {
+    return { minAmount, maxAmount, error: "最低金额必须是大于或等于 0 的数字" };
+  }
+  if (maxAmount !== null && (!Number.isFinite(maxAmount) || maxAmount < 0)) {
+    return { minAmount, maxAmount, error: "最高金额必须是大于或等于 0 的数字" };
+  }
+  if (minAmount !== null && maxAmount !== null && minAmount > maxAmount) {
+    return { minAmount, maxAmount, error: "最低金额不能高于最高金额" };
+  }
+  return { minAmount, maxAmount, error: "" };
 }
 
 function getDetailResultHint(count) {
   if (detailStartDateInput.value && detailEndDateInput.value && detailStartDateInput.value > detailEndDateInput.value) {
     return "开始日期不能晚于结束日期";
   }
+  const amountRange = getDetailAmountRange();
+  if (amountRange.error) return amountRange.error;
   const parts = [`显示 ${count} 条`];
   if (detailStartDateInput.value || detailEndDateInput.value) {
     parts.push(`${detailStartDateInput.value || "最早"} 至 ${detailEndDateInput.value || "今天"}`);
@@ -981,17 +1037,38 @@ function getDetailResultHint(count) {
   if (filterCategory.value !== "all") parts.push(displayCategory(filterCategory.value));
   if (filterType.value !== "all") parts.push(filterType.value === "income" ? "收入" : "支出");
   if (filterPerson.value !== "all") parts.push(displayPerson(filterPerson.value));
+  if (amountRange.minAmount !== null && amountRange.maxAmount !== null) {
+    parts.push(`金额 ${money(amountRange.minAmount)}–${money(amountRange.maxAmount)}`);
+  } else if (amountRange.minAmount !== null) {
+    parts.push(`金额 ≥ ${money(amountRange.minAmount)}`);
+  } else if (amountRange.maxAmount !== null) {
+    parts.push(`金额 ≤ ${money(amountRange.maxAmount)}`);
+  }
+  if (detailAmountSortDirection) parts.push(detailAmountSortDirection === "desc" ? "金额从大到小" : "金额从小到大");
   return parts.join(" · ");
 }
 
-function sortRecordsBySpentDate(items) {
+function sortDetailRecords(items) {
+  if (!detailAmountSortDirection) return sortRecordsBySpentDate(items);
   return [...items].sort((left, right) => {
-    const dateDifference = getRecordDay(right).localeCompare(getRecordDay(left));
-    if (dateDifference) return dateDifference;
-    const leftCreatedAt = Date.parse(left.createdAt || "") || 0;
-    const rightCreatedAt = Date.parse(right.createdAt || "") || 0;
-    return rightCreatedAt - leftCreatedAt;
+    const leftAmount = Number(left.amount) || 0;
+    const rightAmount = Number(right.amount) || 0;
+    const amountDifference = detailAmountSortDirection === "asc" ? leftAmount - rightAmount : rightAmount - leftAmount;
+    if (amountDifference) return amountDifference;
+    return compareRecordsBySpentDate(left, right);
   });
+}
+
+function sortRecordsBySpentDate(items) {
+  return [...items].sort(compareRecordsBySpentDate);
+}
+
+function compareRecordsBySpentDate(left, right) {
+  const dateDifference = getRecordDay(right).localeCompare(getRecordDay(left));
+  if (dateDifference) return dateDifference;
+  const leftCreatedAt = Date.parse(left.createdAt || "") || 0;
+  const rightCreatedAt = Date.parse(right.createdAt || "") || 0;
+  return rightCreatedAt - leftCreatedAt;
 }
 
 function startNewTrip() {
@@ -3221,6 +3298,7 @@ tripStatusFilter.value = "active";
 calendarViewMonth = exportStartDateInput.value.slice(0, 7);
 updateDateRangeText();
 updateDetailDateRangeText();
+updateDetailAmountSortButton();
 renderCalendar();
 syncBenefitField();
 fillMajorCategories();

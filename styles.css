@@ -682,17 +682,65 @@ select:focus {
 }
 
 .detail-date-picker,
-#clearDetailFiltersBtn {
+.detail-amount-filter {
   grid-column: 1 / -1;
 }
 
+.detail-amount-filter {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+}
+
+.detail-control-label,
+.detail-sort-control > span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.detail-amount-inputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.detail-amount-inputs input {
+  background: #fff;
+}
+
+.detail-amount-filter small {
+  display: block;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.detail-sort-control {
+  display: grid;
+  min-width: 0;
+}
+
+.detail-sort-button,
 #clearDetailFiltersBtn {
-  min-height: 40px;
+  min-height: 44px;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: #fff;
   color: var(--green-dark);
+  padding: 0 10px;
   font-weight: 800;
+}
+
+.detail-sort-button[data-direction="desc"],
+.detail-sort-button[data-direction="asc"] {
+  border-color: var(--green);
+  background: var(--green);
+  color: #fff;
 }
 
 .record-search {
@@ -1187,6 +1235,10 @@ select:focus {
   .detail-filters,
   .trip-form,
   .trip-settlement-form {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-amount-inputs {
     grid-template-columns: 1fr;
   }
 

@@ -10,7 +10,7 @@
     <title>家庭记账</title>
     <link rel="apple-touch-icon" href="./assets/miniapp-avatar-xl.png" />
     <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="stylesheet" href="./styles.css?v=20260803-business-trips-3" />
+    <link rel="stylesheet" href="./styles.css?v=20260824-detail-amount-sort" />
   </head>
   <body>
     <main class="app-shell">
@@ -188,6 +188,20 @@
                 <option value="all">全部类别</option>
               </select>
             </label>
+            <div class="detail-amount-filter" role="group" aria-labelledby="detailAmountFilterLabel" aria-describedby="detailAmountHelp">
+              <span id="detailAmountFilterLabel" class="detail-control-label">金额区间（元）</span>
+              <div class="detail-amount-inputs">
+                <label>
+                  <span>最低金额（≥）</span>
+                  <input id="detailMinAmount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="例如 200" />
+                </label>
+                <label>
+                  <span>最高金额（≤）</span>
+                  <input id="detailMaxAmount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="例如 300" />
+                </label>
+              </div>
+              <small id="detailAmountHelp">区间包含两端；只填一侧即可筛选大额或小额记录。</small>
+            </div>
             <div class="date-range-picker detail-date-picker">
               <span>明细时间段</span>
               <button id="detailDateRangeBtn" class="date-range-button" type="button">
@@ -197,7 +211,11 @@
               <input id="detailStartDate" type="hidden" />
               <input id="detailEndDate" type="hidden" />
             </div>
-            <button id="clearDetailFiltersBtn" type="button">重置筛选</button>
+            <div class="detail-sort-control">
+              <span>金额排序</span>
+              <button id="amountSortBtn" class="detail-sort-button" type="button" aria-pressed="false">按金额排序</button>
+            </div>
+            <button id="clearDetailFiltersBtn" type="button">重置筛选与排序</button>
           </div>
           <input id="searchInput" class="record-search" type="search" autocomplete="off" placeholder="搜索分类、备注、日期、金额" />
           <div id="detailResultHint" class="detail-result-hint"></div>
@@ -413,6 +431,6 @@
     <script src="./config.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
-    <script src="./app.js?v=20260803-trip-archive-2"></script>
+    <script src="./app.js?v=20260824-detail-amount-sort"></script>
   </body>
 </html>

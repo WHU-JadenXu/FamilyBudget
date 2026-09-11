@@ -258,6 +258,12 @@ h2 {
   min-width: 0;
 }
 
+.entry-form input,
+.entry-form select {
+  height: 44px;
+  min-height: 44px;
+}
+
 label span {
   display: block;
   margin-bottom: 6px;
@@ -1162,6 +1168,12 @@ select:focus {
   background: #fff;
   color: var(--green-dark);
   box-shadow: 0 6px 16px rgba(31, 36, 36, 0.08);
+}
+
+@media (max-width: 520px) {
+  .entry-form {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 360px) {

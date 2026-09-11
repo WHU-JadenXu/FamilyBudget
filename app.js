@@ -170,7 +170,6 @@ let detailAmountSortDirection = "";
 const form = document.querySelector("#entryForm");
 const amountInput = document.querySelector("#amount");
 const entryDateInput = document.querySelector("#entryDate");
-const personSelect = document.querySelector("#person");
 const majorSelect = document.querySelector("#majorCategory");
 const minorSelect = document.querySelector("#minorCategory");
 const noteInput = document.querySelector("#note");
@@ -353,6 +352,11 @@ form.addEventListener("submit", async (event) => {
     cancelEdit();
     return;
   }
+  const recordPerson = existingRecord?.person || getCurrentRecordPerson();
+  if (!recordPerson) {
+    alert("当前登录账号没有匹配到记账人，请检查 config.js 中的账号映射后再记账。");
+    return;
+  }
 
   const tripAssociation = getEntryTripAssociation(existingRecord);
   if (!tripAssociation) return;
@@ -361,7 +365,7 @@ form.addEventListener("submit", async (event) => {
     let updatedRecord = {
       ...existingRecord,
       type: activeType,
-      person: personSelect.value,
+      person: recordPerson,
       amount: Math.round(amount * 100) / 100,
       benefit: "",
       major: majorSelect.value,
@@ -390,7 +394,7 @@ form.addEventListener("submit", async (event) => {
   let record = {
     id: createUuid(),
     type: activeType,
-    person: personSelect.value,
+    person: recordPerson,
     amount: Math.round(amount * 100) / 100,
     benefit: "",
     major: majorSelect.value,
@@ -810,7 +814,6 @@ function getClearableRangeRecords(recordItems, startDate, endDate) {
 
 function resetForm() {
   form.reset();
-  personSelect.value = getDefaultPerson();
   entryDateInput.value = getShanghaiDay();
   fillMajorCategories();
   syncTripProjectField();
@@ -2013,12 +2016,10 @@ function getRecordSearchText(record) {
 }
 
 async function applyPreferredPersonForCurrentUser() {
+  if (!currentUser?.email) return;
   const matchedPerson = await getMatchedPersonForEmail(currentUser?.email || "");
-  if (matchedPerson) {
-    preferredPerson = matchedPerson;
-    localStorage.setItem(`${storageKey}-preferred-person`, preferredPerson);
-  }
-  if (!editingRecordId) personSelect.value = getDefaultPerson();
+  preferredPerson = matchedPerson;
+  localStorage.setItem(`${storageKey}-preferred-person`, preferredPerson);
 }
 
 async function getMatchedPersonForEmail(email) {
@@ -2037,6 +2038,11 @@ async function sha256Hex(value) {
 
 function getDefaultPerson() {
   return people.includes(preferredPerson) ? preferredPerson : people[0];
+}
+
+function getCurrentRecordPerson() {
+  if (isCloudReady) return people.includes(preferredPerson) ? preferredPerson : "";
+  return getDefaultPerson();
 }
 
 async function handleRecordAction(event) {
@@ -2075,7 +2081,6 @@ function startEdit(recordId) {
   editingRecordId = recordId;
   editingRecordBaseUpdatedAt = record.updatedAt || "";
   setActiveType(record.type);
-  personSelect.value = record.person;
   amountInput.value = record.amount;
   entryDateInput.value = getRecordDay(record);
   majorSelect.value = record.major;

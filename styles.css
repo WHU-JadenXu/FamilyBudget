@@ -247,185 +247,6 @@ h2 {
   box-shadow: 0 6px 16px rgba(31, 36, 36, 0.09);
 }
 
-.receipt-scan {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 6px 10px;
-  margin-top: 10px;
-  padding: 8px 10px;
-  border: 1px solid #c9ded6;
-  border-radius: 8px;
-  background: #f2f8f5;
-}
-
-.receipt-scan-copy {
-  min-width: 0;
-}
-
-.receipt-scan-copy strong,
-.receipt-scan-copy span {
-  display: block;
-}
-
-.receipt-scan-copy strong {
-  color: var(--green-dark);
-  font-size: 13px;
-  line-height: 1.3;
-}
-
-.receipt-scan-copy span {
-  margin-top: 4px;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.receipt-upload {
-  display: grid;
-  place-items: center;
-  min-height: 36px;
-  padding: 0 12px;
-  border: 1px solid var(--green);
-  border-radius: 7px;
-  background: #fff;
-  color: var(--green-dark);
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 800;
-  white-space: nowrap;
-}
-
-.receipt-upload span {
-  margin: 0;
-  color: inherit;
-  font-size: inherit;
-}
-
-.receipt-upload input {
-  display: none;
-}
-
-.receipt-upload.is-busy {
-  cursor: wait;
-  opacity: 0.62;
-}
-
-.receipt-scan-status {
-  grid-column: 1 / -1;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.receipt-scan-status:empty {
-  display: none;
-}
-
-.receipt-scan-status.success {
-  color: var(--green-dark);
-  font-weight: 700;
-}
-
-.receipt-scan-status.error {
-  color: var(--danger);
-  font-weight: 700;
-}
-
-.receipt-batch {
-  display: grid;
-  grid-column: 1 / -1;
-  gap: 10px;
-  padding-top: 10px;
-  border-top: 1px solid #c9ded6;
-}
-
-.receipt-batch-head strong,
-.receipt-batch-head span {
-  display: block;
-}
-
-.receipt-batch-head strong {
-  color: var(--ink);
-  font-size: 14px;
-}
-
-.receipt-batch-head span {
-  margin-top: 3px;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.receipt-batch-list {
-  display: grid;
-  gap: 8px;
-  max-height: 330px;
-  overflow-y: auto;
-}
-
-.receipt-batch-item {
-  display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 9px;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: #fff;
-}
-
-.receipt-batch-item input {
-  width: 20px;
-  min-height: 20px;
-  margin: 0;
-  accent-color: var(--green);
-}
-
-.receipt-batch-copy {
-  min-width: 0;
-}
-
-.receipt-batch-copy strong,
-.receipt-batch-copy span {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.receipt-batch-copy strong {
-  color: var(--ink);
-  font-size: 13px;
-}
-
-.receipt-batch-copy span {
-  margin: 3px 0 0;
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.receipt-batch-money {
-  color: var(--ink);
-  font-size: 13px;
-  white-space: nowrap;
-}
-
-.receipt-batch-money.income {
-  color: var(--blue);
-}
-
-.receipt-batch-actions {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-}
-
-.receipt-batch-actions .primary-action,
-.receipt-batch-actions .secondary-action {
-  min-height: 42px;
-}
-
 .entry-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -727,6 +548,7 @@ select:focus {
 
 .detail-sort-button,
 #clearDetailFiltersBtn {
+  height: 44px;
   min-height: 44px;
   border: 1px solid var(--line);
   border-radius: 7px;
@@ -734,6 +556,10 @@ select:focus {
   color: var(--green-dark);
   padding: 0 10px;
   font-weight: 800;
+}
+
+#clearDetailFiltersBtn {
+  align-self: end;
 }
 
 .detail-sort-button[data-direction="desc"],
@@ -852,12 +678,133 @@ select:focus {
 .trip-overview-panel,
 .trip-form-panel,
 .trip-list-section,
-.trip-detail-panel {
+.trip-detail-panel,
+.asset-overview-panel,
+.asset-form-panel,
+.asset-list-section {
   margin-top: 16px;
   padding: 14px;
   border: 1px solid var(--line);
   border-radius: 9px;
   background: rgba(255, 255, 255, 0.9);
+}
+
+.asset-page-heading .primary-action {
+  min-height: 40px;
+  padding: 0 14px;
+}
+
+.asset-summary-grid {
+  display: grid;
+  grid-template-columns: 0.8fr 1.2fr;
+  gap: 8px;
+}
+
+.asset-summary-grid div {
+  padding: 11px;
+  border-radius: 8px;
+  background: var(--soft);
+}
+
+.asset-summary-grid span,
+.asset-summary-grid strong {
+  display: block;
+}
+
+.asset-summary-grid span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.asset-summary-grid strong {
+  margin-top: 4px;
+  color: var(--green-dark);
+  font-size: 20px;
+}
+
+.asset-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.asset-list {
+  display: grid;
+  gap: 10px;
+}
+
+.asset-card {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+}
+
+.asset-card-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  background: #dbeee4;
+  font-size: 20px;
+}
+
+.asset-card-copy {
+  min-width: 0;
+}
+
+.asset-card-copy strong,
+.asset-card-copy span,
+.asset-card-copy small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-card-copy strong {
+  font-size: 15px;
+}
+
+.asset-card-copy span,
+.asset-card-copy small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.asset-card-balance {
+  color: var(--green-dark);
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.asset-card-actions {
+  display: grid;
+  grid-column: 2 / -1;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  width: min(180px, 100%);
+  justify-self: end;
+}
+
+.asset-card-actions button {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--green-dark);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.asset-card-actions .asset-delete {
+  color: var(--danger);
 }
 
 .trip-page-heading {
@@ -1191,7 +1138,7 @@ select:focus {
   bottom: 0;
   z-index: 10;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 5px;
   width: min(100%, 480px);
   padding: 10px 14px max(10px, env(safe-area-inset-bottom));
@@ -1234,7 +1181,8 @@ select:focus {
   .entry-form,
   .detail-filters,
   .trip-form,
-  .trip-settlement-form {
+  .trip-settlement-form,
+  .asset-form {
     grid-template-columns: 1fr;
   }
 
@@ -1278,6 +1226,20 @@ select:focus {
 
   .record-item {
     grid-template-columns: 38px minmax(0, 1fr);
+  }
+
+  .asset-card {
+    grid-template-columns: 38px minmax(0, 1fr);
+  }
+
+  .asset-card-balance {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .asset-card-actions {
+    grid-column: 1 / -1;
+    width: 100%;
   }
 
   .record-money {

@@ -10,7 +10,7 @@
     <title>家庭记账</title>
     <link rel="apple-touch-icon" href="./assets/miniapp-avatar-xl.png" />
     <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="stylesheet" href="./styles.css?v=20260824-detail-amount-sort" />
+    <link rel="stylesheet" href="./styles.css?v=20260911-stored-assets" />
   </head>
   <body>
     <main class="app-shell">
@@ -65,28 +65,6 @@
             <button class="segment" data-type="income" type="button">收入</button>
           </div>
 
-          <section class="receipt-scan" aria-labelledby="receiptScanTitle">
-            <div class="receipt-scan-copy">
-              <strong id="receiptScanTitle">单笔支付截图智能填单</strong>
-            </div>
-            <label class="receipt-upload">
-              <span id="receiptUploadText">选择截图</span>
-              <input id="receiptImageInput" type="file" accept="image/*" multiple />
-            </label>
-            <div id="receiptScanStatus" class="receipt-scan-status" role="status" aria-live="polite"></div>
-            <section id="receiptBatchPanel" class="receipt-batch" aria-labelledby="receiptBatchTitle" hidden>
-              <div class="receipt-batch-head">
-                <strong id="receiptBatchTitle">识别到多张单笔截图</strong>
-                <span>每张截图只生成一条记录，请核对后加入账本。</span>
-              </div>
-              <div id="receiptBatchList" class="receipt-batch-list"></div>
-              <div class="receipt-batch-actions">
-                <button id="receiptBatchAddBtn" class="primary-action" type="button">加入选中记录</button>
-                <button id="receiptBatchCancelBtn" class="secondary-action" type="button">取消</button>
-              </div>
-            </section>
-          </section>
-
           <form id="entryForm" class="entry-form">
             <label>
               <span>记账人</span>
@@ -104,15 +82,6 @@
             <label>
               <span>日期</span>
               <input id="entryDate" name="entryDate" type="date" required />
-            </label>
-
-            <label id="benefitField">
-              <span>花给谁</span>
-              <select id="benefit" name="benefit">
-                <option value="李逍宇用">👦 李逍宇用</option>
-                <option value="徐佳丹用">👧 徐佳丹用</option>
-                <option value="两个人共用">👫 两个人共用</option>
-              </select>
             </label>
 
             <label>
@@ -188,7 +157,7 @@
                 <option value="all">全部类别</option>
               </select>
             </label>
-            <div class="detail-amount-filter" role="group" aria-labelledby="detailAmountFilterLabel" aria-describedby="detailAmountHelp">
+            <div class="detail-amount-filter" role="group" aria-labelledby="detailAmountFilterLabel">
               <span id="detailAmountFilterLabel" class="detail-control-label">金额区间（元）</span>
               <div class="detail-amount-inputs">
                 <label>
@@ -200,7 +169,6 @@
                   <input id="detailMaxAmount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="例如 300" />
                 </label>
               </div>
-              <small id="detailAmountHelp">区间包含两端；只填一侧即可筛选大额或小额记录。</small>
             </div>
             <div class="date-range-picker detail-date-picker">
               <span>明细时间段</span>
@@ -361,6 +329,73 @@
         </section>
       </section>
 
+      <section id="pageAssets" class="app-page" data-page="assets">
+        <section class="asset-overview-panel">
+          <div class="section-heading asset-page-heading">
+            <div>
+              <p class="eyebrow">STORED VALUE</p>
+              <h2>会员卡与储值资产</h2>
+            </div>
+            <button id="newAssetBtn" class="primary-action" type="button">新增资产</button>
+          </div>
+          <div class="asset-summary-grid" aria-label="储值资产汇总">
+            <div><span>资产数量</span><strong id="assetCount">0</strong></div>
+            <div><span>当前余额合计</span><strong id="assetBalanceTotal">¥0.00</strong></div>
+          </div>
+        </section>
+
+        <section id="assetFormPanel" class="asset-form-panel" hidden>
+          <div class="section-heading">
+            <h2 id="assetFormTitle">新增储值资产</h2>
+          </div>
+          <form id="assetForm" class="asset-form">
+            <label class="full">
+              <span>名称</span>
+              <input id="assetName" autocomplete="off" placeholder="例如：山姆会员卡、公交卡、游戏点券" required />
+            </label>
+            <label>
+              <span>类型</span>
+              <select id="assetType">
+                <option value="membership">会员卡</option>
+                <option value="stored_value">储值卡</option>
+                <option value="digital">数字资产</option>
+              </select>
+            </label>
+            <label>
+              <span>归属</span>
+              <select id="assetOwner">
+                <option value="李逍宇">👦 李逍宇</option>
+                <option value="徐佳丹">👧 徐佳丹</option>
+                <option value="共同">👫 共同</option>
+              </select>
+            </label>
+            <label>
+              <span>当前余额</span>
+              <input id="assetBalance" inputmode="decimal" placeholder="0.00" required />
+            </label>
+            <label>
+              <span>更新日期</span>
+              <input id="assetUpdatedOn" type="date" required />
+            </label>
+            <label class="full">
+              <span>备注</span>
+              <input id="assetNote" autocomplete="off" placeholder="例如：卡号尾号、有效期或使用说明" />
+            </label>
+            <div class="form-actions full">
+              <button id="saveAssetBtn" class="primary-action" type="submit">保存资产</button>
+              <button id="cancelAssetEditBtn" class="secondary-action" type="button">取消</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="asset-list-section">
+          <div class="section-heading">
+            <h2>资产列表</h2>
+          </div>
+          <div id="assetList" class="asset-list"></div>
+        </section>
+      </section>
+
       <section id="pageExport" class="app-page" data-page="export">
         <section class="toolbar" aria-label="数据工具">
           <div class="date-range-picker">
@@ -409,6 +444,7 @@
         <button class="bottom-tab active" data-target-page="entry" type="button">记录</button>
         <button class="bottom-tab" data-target-page="records" type="button">明细</button>
         <button class="bottom-tab" data-target-page="trips" type="button">出差</button>
+        <button class="bottom-tab" data-target-page="assets" type="button">储值</button>
         <button class="bottom-tab" data-target-page="export" type="button">导出</button>
       </nav>
     </main>
@@ -430,7 +466,6 @@
 
     <script src="./config.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
-    <script src="./app.js?v=20260824-detail-amount-sort"></script>
+    <script src="./app.js?v=20260911-stored-assets"></script>
   </body>
 </html>

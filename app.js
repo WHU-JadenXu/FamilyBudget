@@ -15,7 +15,7 @@ const categoryMap = {
     医疗: ["挂号", "药品", "体检", "保险"],
     娱乐: ["电影演出", "旅行", "游戏会员", "聚会", "运动"],
     人情: ["红包", "请客", "父母家人", "朋友往来"],
-    其他: ["未分类", "出差未报销"]
+    其他: ["未分类", "快递", "出差未报销"]
   },
   income: {
     工资: ["工资", "奖金", "补贴"],
@@ -84,6 +84,7 @@ const minorLabels = {
   父母家人: "👨‍👩‍👧 父母家人",
   朋友往来: "🤝 朋友往来",
   未分类: "📌 未分类",
+  快递: "📦 快递",
   工资: "💰 工资",
   奖金: "🎉 奖金",
   补贴: "🧧 补贴",
@@ -101,14 +102,15 @@ const minorLabels = {
   退款: "↩️ 退款"
 };
 
-const benefitLabels = {
-  李逍宇用: "👦 李逍宇用",
-  徐佳丹用: "👧 徐佳丹用",
-  两个人共用: "👫 两个人共用"
+const assetTypeLabels = {
+  membership: "🎫 会员卡",
+  stored_value: "💳 储值卡",
+  digital: "💎 数字资产"
 };
 
 const storageKey = "family-ledger-web-v1";
 const tripStorageKey = "family-ledger-trips-v1";
+const assetStorageKey = "family-ledger-stored-assets-v1";
 const config = window.LEDGER_CONFIG || {};
 const familyId = config.FAMILY_ID || "li-xu-family";
 const configuredSiteUrl = (config.SITE_URL || "").trim();
@@ -136,6 +138,8 @@ const cloudRecordFields =
   "id,type,person,amount,benefit,major,minor,note,spent_on,created_at,updated_at,deleted_at,created_by,trip_id,trip_role,trip_linked_at,trip_original_major,trip_original_minor";
 const cloudTripFields =
   "id,trip_no,traveler,subject,destination,start_on,end_on,daily_allowance,status,reimbursement_amount,reimbursed_on,expense_total_at_archive,allowance_total_at_archive,surplus_at_archive,settlement_record_id,archived_at,deleted_at,created_at,updated_at,created_by";
+const cloudAssetFields =
+  "id,name,asset_type,owner,balance,note,balance_updated_on,deleted_at,created_at,updated_at,created_by";
 const hasSupabaseConfig = Boolean(config.SUPABASE_URL && config.SUPABASE_ANON_KEY);
 const supabaseClient =
   hasSupabaseConfig && window.supabase
@@ -145,15 +149,19 @@ const supabaseClient =
 let activeType = "expense";
 let records = loadRecords();
 let trips = loadTrips();
+let assets = loadAssets();
 let currentUser = null;
 let isCloudReady = false;
 let editingRecordId = "";
 let editingTripId = "";
+let editingAssetId = "";
 let editingRecordBaseUpdatedAt = "";
 let editingTripBaseUpdatedAt = "";
+let editingAssetBaseUpdatedAt = "";
 let lastCloudRecordError = null;
 let activeTripId = "";
 let lastCloudTripError = null;
+let lastCloudAssetError = null;
 let cloudSyncPromise = null;
 let lastSuccessfulSyncAt = 0;
 let preferredPerson = localStorage.getItem(`${storageKey}-preferred-person`) || "";
@@ -163,8 +171,6 @@ const form = document.querySelector("#entryForm");
 const amountInput = document.querySelector("#amount");
 const entryDateInput = document.querySelector("#entryDate");
 const personSelect = document.querySelector("#person");
-const benefitField = document.querySelector("#benefitField");
-const benefitSelect = document.querySelector("#benefit");
 const majorSelect = document.querySelector("#majorCategory");
 const minorSelect = document.querySelector("#minorCategory");
 const noteInput = document.querySelector("#note");
@@ -187,14 +193,6 @@ const clearDetailFiltersBtn = document.querySelector("#clearDetailFiltersBtn");
 const detailResultHint = document.querySelector("#detailResultHint");
 const searchInput = document.querySelector("#searchInput");
 const monthlySummary = document.querySelector("#monthlySummary");
-const receiptImageInput = document.querySelector("#receiptImageInput");
-const receiptUploadText = document.querySelector("#receiptUploadText");
-const receiptScanStatus = document.querySelector("#receiptScanStatus");
-const receiptBatchPanel = document.querySelector("#receiptBatchPanel");
-const receiptBatchTitle = document.querySelector("#receiptBatchTitle");
-const receiptBatchList = document.querySelector("#receiptBatchList");
-const receiptBatchAddBtn = document.querySelector("#receiptBatchAddBtn");
-const receiptBatchCancelBtn = document.querySelector("#receiptBatchCancelBtn");
 const cloudStatus = document.querySelector("#cloudStatus");
 const cloudHint = document.querySelector("#cloudHint");
 const loginForm = document.querySelector("#loginForm");
@@ -240,6 +238,21 @@ const tripOngoingCount = document.querySelector("#tripOngoingCount");
 const tripPendingCount = document.querySelector("#tripPendingCount");
 const tripReimbursedCount = document.querySelector("#tripReimbursedCount");
 const tripArchivedCount = document.querySelector("#tripArchivedCount");
+const newAssetBtn = document.querySelector("#newAssetBtn");
+const assetFormPanel = document.querySelector("#assetFormPanel");
+const assetForm = document.querySelector("#assetForm");
+const assetFormTitle = document.querySelector("#assetFormTitle");
+const assetNameInput = document.querySelector("#assetName");
+const assetTypeSelect = document.querySelector("#assetType");
+const assetOwnerSelect = document.querySelector("#assetOwner");
+const assetBalanceInput = document.querySelector("#assetBalance");
+const assetUpdatedOnInput = document.querySelector("#assetUpdatedOn");
+const assetNoteInput = document.querySelector("#assetNote");
+const saveAssetBtn = document.querySelector("#saveAssetBtn");
+const cancelAssetEditBtn = document.querySelector("#cancelAssetEditBtn");
+const assetCount = document.querySelector("#assetCount");
+const assetBalanceTotal = document.querySelector("#assetBalanceTotal");
+const assetList = document.querySelector("#assetList");
 const exportStartDateInput = document.querySelector("#exportStartDate");
 const exportEndDateInput = document.querySelector("#exportEndDate");
 const exportExcelBtn = document.querySelector("#exportExcelBtn");
@@ -257,18 +270,12 @@ const pageNodes = document.querySelectorAll(".app-page");
 const bottomTabs = document.querySelectorAll(".bottom-tab");
 let calendarViewMonth = "";
 let activeCalendarTarget = "export";
-let receiptOcrWorker = null;
-let receiptOcrWorkerPromise = null;
-let receiptOcrWorkerAttempt = 0;
-let receiptOcrIdleTimer = null;
-let pendingReceiptRecords = [];
 
 document.querySelectorAll(".segment").forEach((button) => {
   button.addEventListener("click", () => {
     activeType = button.dataset.type;
     document.querySelectorAll(".segment").forEach((item) => item.classList.remove("active"));
     button.classList.add("active");
-    syncBenefitField();
     fillMajorCategories();
   });
 });
@@ -277,7 +284,6 @@ majorSelect.addEventListener("change", () => {
   fillMinorCategories();
   syncTripProjectField();
 });
-personSelect.addEventListener("change", syncBenefitWithPerson);
 recordLimitSelect.addEventListener("change", render);
 filterPerson.addEventListener("change", render);
 filterType.addEventListener("change", render);
@@ -306,6 +312,10 @@ cancelTripAssignBtn.addEventListener("click", closeTripAssignPanel);
 tripReimbursementAmountInput.addEventListener("input", updateTripSettlementPreview);
 tripSettlementForm.addEventListener("submit", archiveActiveTrip);
 cancelTripSettlementBtn.addEventListener("click", closeTripSettlementPanel);
+newAssetBtn.addEventListener("click", startNewAsset);
+assetForm.addEventListener("submit", saveAssetFromForm);
+cancelAssetEditBtn.addEventListener("click", closeAssetForm);
+assetList.addEventListener("click", handleAssetAction);
 dateRangeBtn.addEventListener("click", (event) => toggleCalendarPanel(event, "export"));
 detailDateRangeBtn.addEventListener("click", (event) => toggleCalendarPanel(event, "detail"));
 calendarPrevBtn.addEventListener("click", () => shiftCalendarMonth(-1));
@@ -314,13 +324,6 @@ calendarGrid.addEventListener("click", handleCalendarClick);
 document.addEventListener("click", closeCalendarOnOutsideClick);
 bottomTabs.forEach((button) => {
   button.addEventListener("click", () => switchPage(button.dataset.targetPage));
-});
-receiptImageInput.addEventListener("change", handleReceiptImage);
-receiptBatchList.addEventListener("change", updateReceiptBatchButton);
-receiptBatchAddBtn.addEventListener("click", importSelectedReceiptRecords);
-receiptBatchCancelBtn.addEventListener("click", clearReceiptBatch);
-window.addEventListener("pagehide", () => {
-  if (receiptOcrWorker) receiptOcrWorker.terminate().catch(() => {});
 });
 window.addEventListener("focus", refreshCloudWhenForeground);
 document.addEventListener("visibilitychange", () => {
@@ -360,7 +363,7 @@ form.addEventListener("submit", async (event) => {
       type: activeType,
       person: personSelect.value,
       amount: Math.round(amount * 100) / 100,
-      benefit: activeType === "expense" ? benefitSelect.value : "",
+      benefit: "",
       major: majorSelect.value,
       minor: minorSelect.value,
       note: noteInput.value.trim(),
@@ -389,7 +392,7 @@ form.addEventListener("submit", async (event) => {
     type: activeType,
     person: personSelect.value,
     amount: Math.round(amount * 100) / 100,
-    benefit: activeType === "expense" ? benefitSelect.value : "",
+    benefit: "",
     major: majorSelect.value,
     minor: minorSelect.value,
     note: noteInput.value.trim(),
@@ -414,10 +417,11 @@ form.addEventListener("submit", async (event) => {
 
 document.querySelector("#exportBtn").addEventListener("click", () => {
   const backup = {
-    version: 2,
+    version: 3,
     exportedAt: new Date().toISOString(),
     records,
-    trips
+    trips,
+    assets
   };
   const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
   downloadBlob(blob, `家庭记账-${getShanghaiDay()}.json`);
@@ -434,11 +438,13 @@ document.querySelector("#importFile").addEventListener("change", async (event) =
     const imported = JSON.parse(await file.text());
     let importedRecords = [];
     let importedTrips = null;
+    let importedAssets = null;
     if (Array.isArray(imported)) {
       importedRecords = migrateRecords(imported.filter(isRecord));
     } else if (imported && Array.isArray(imported.records) && Array.isArray(imported.trips)) {
       importedRecords = migrateRecords(imported.records.filter(isRecord));
       importedTrips = imported.trips.filter(isTrip).map(normalizeTrip);
+      importedAssets = Array.isArray(imported.assets) ? imported.assets.filter(isAsset).map(normalizeAsset) : null;
     } else {
       throw new Error("Invalid data");
     }
@@ -446,14 +452,17 @@ document.querySelector("#importFile").addEventListener("change", async (event) =
     if (!canMutateLedger()) return;
     if (isCloudReady) {
       const tripLabel = importedTrips ? `、${importedTrips.length} 个出差项目` : "";
-      if (!confirm(`确定恢复这份备份吗？\n\n将把 ${importedRecords.length} 条账目${tripLabel}写入当前家庭云端账本；相同 ID 的云端数据会以这份备份为准。`)) return;
-      if (!(await restoreBackupToCloud(importedRecords, importedTrips))) return;
+      const assetLabel = importedAssets ? `、${importedAssets.length} 个储值资产` : "";
+      if (!confirm(`确定恢复这份备份吗？\n\n将把 ${importedRecords.length} 条账目${tripLabel}${assetLabel}写入当前家庭云端账本；相同 ID 的云端数据会以这份备份为准。`)) return;
+      if (!(await restoreBackupToCloud(importedRecords, importedTrips, importedAssets))) return;
       await syncCloudRecords();
     } else {
       records = importedRecords;
       if (importedTrips) trips = importedTrips;
+      if (importedAssets) assets = importedAssets;
       saveRecords();
       saveTrips();
+      saveAssets();
       render();
     }
   } catch {
@@ -466,14 +475,15 @@ document.querySelector("#importFile").addEventListener("change", async (event) =
 clearRangeBtn.addEventListener("click", clearSelectedRangeRecords);
 
 clearBtn.addEventListener("click", async () => {
-  if (!records.length && !trips.length && !isCloudReady) return;
+  if (!records.length && !trips.length && !assets.length && !isCloudReady) return;
   const storageSize = getLedgerStorageSize();
   const sizeLabel = storageSize ? `\n当前本地数据约 ${formatBytes(storageSize)}。` : "";
   const linkedTripRecordCount = records.filter(isTripProjectRecord).length;
   const dailyRecordCount = records.filter(isDailyRecord).length;
   const visibleTripCount = trips.filter((trip) => !trip.deletedAt).length;
   const deletedTripCount = trips.length - visibleTripCount;
-  const countLabel = `日常记录 ${dailyRecordCount} 条、出差项目收支 ${linkedTripRecordCount} 条、出差项目 ${visibleTripCount} 个${deletedTripCount ? `、已删除编号留档 ${deletedTripCount} 个` : ""}`;
+  const visibleAssetCount = assets.filter((asset) => !asset.deletedAt).length;
+  const countLabel = `日常记录 ${dailyRecordCount} 条、出差项目收支 ${linkedTripRecordCount} 条、出差项目 ${visibleTripCount} 个${deletedTripCount ? `、已删除编号留档 ${deletedTripCount} 个` : ""}、储值资产 ${visibleAssetCount} 个`;
   const captcha = createCaptchaCode();
   const answer = prompt(`确定清空当前账本的全部数据吗？\n${countLabel}${sizeLabel}\n\n这个操作会清空本地的日常账目、出差项目收支和出差项目；如果已登录同步，也会清空云端对应数据。\n\n请输入验证码 ${captcha} 后继续：`);
   if (answer === null) return;
@@ -495,13 +505,22 @@ clearBtn.addEventListener("click", async () => {
       alert("账目已从云端删除，但出差项目删除失败；页面已重新读取云端当前状态，请重试清空。\n\n系统不会再把本机旧缓存自动写回云端。");
       return;
     }
+    const { error: assetError } = await supabaseClient.from("stored_assets").delete().eq("family_id", familyId);
+    if (assetError) {
+      setCloudState("储值资产清空失败", formatCloudSchemaError(assetError));
+      await syncCloudRecords({ quiet: true });
+      alert("账目和出差项目已从云端删除，但储值资产删除失败；页面已重新读取云端当前状态，请重试清空。");
+      return;
+    }
   }
 
   records = [];
   trips = [];
+  assets = [];
   activeTripId = "";
   saveRecords();
   saveTrips();
+  saveAssets();
   render();
   updateAuthUi();
 });
@@ -652,7 +671,6 @@ async function exportExcelRecords({ allRecords = false } = {}) {
       record.type === "income" ? "收入" : "支出",
       displayPerson(record.person),
       record.amount,
-      displayBenefit(record.benefit),
       displayCategory(record.major),
       displayMinor(record.minor),
       record.note || "",
@@ -669,11 +687,11 @@ async function exportExcelRecords({ allRecords = false } = {}) {
 
   const sheetHtml = buildExcelSheet({
     title: allRecords ? "家庭记账 全部记录" : `家庭记账 ${startDate} 至 ${endDate}`,
-    headers: ["日期", "类型", "记账人", "金额", "花给谁", "大类", "小类", "备注", "创建时间"],
+    headers: ["日期", "类型", "记账人", "金额", "大类", "小类", "备注", "创建时间"],
     rows,
     summaryRows: [
-      ["", "支出合计", "", totals.expense, "", "", "", "", ""],
-      ["", "收入合计", "", totals.income, "", "", "", "", ""]
+      ["", "支出合计", "", totals.expense, "", "", "", ""],
+      ["", "收入合计", "", totals.income, "", "", "", ""]
     ]
   });
 
@@ -794,8 +812,6 @@ function resetForm() {
   form.reset();
   personSelect.value = getDefaultPerson();
   entryDateInput.value = getShanghaiDay();
-  benefitSelect.value = getDefaultBenefit();
-  syncBenefitField();
   fillMajorCategories();
   syncTripProjectField();
 }
@@ -807,7 +823,7 @@ function switchPage(pageName) {
   bottomTabs.forEach((button) => {
     button.classList.toggle("active", button.dataset.targetPage === pageName);
   });
-  monthlySummary.hidden = pageName === "trips";
+  monthlySummary.hidden = ["trips", "assets"].includes(pageName);
 }
 
 function setActiveType(type) {
@@ -815,7 +831,6 @@ function setActiveType(type) {
   document.querySelectorAll(".segment").forEach((button) => {
     button.classList.toggle("active", button.dataset.type === type);
   });
-  syncBenefitField();
   fillMajorCategories();
 }
 
@@ -974,6 +989,7 @@ function render() {
   });
   detailResultHint.textContent = getDetailResultHint(visibleRecords.length);
   renderTrips();
+  renderAssets();
 }
 
 function getVisibleDetailRecords() {
@@ -1677,7 +1693,7 @@ async function archiveActiveTrip(event) {
       type: surplus > 0 ? "income" : "expense",
       person: trip.traveler,
       amount: Math.abs(surplus),
-      benefit: surplus > 0 ? "" : `${trip.traveler}用`,
+      benefit: "",
       major: surplus > 0 ? "工资" : "其他",
       minor: surplus > 0 ? "补贴" : "出差未报销",
       note: `${trip.tripNo} ${trip.subject} ${surplus > 0 ? "出差盈余" : "出差未报销"}`,
@@ -1791,527 +1807,152 @@ function createUuid() {
   });
 }
 
-function setReceiptScanStatus(message, state = "") {
-  receiptScanStatus.textContent = message;
-  receiptScanStatus.classList.toggle("success", state === "success");
-  receiptScanStatus.classList.toggle("error", state === "error");
+function startNewAsset() {
+  editingAssetId = "";
+  editingAssetBaseUpdatedAt = "";
+  assetForm.reset();
+  assetFormTitle.textContent = "新增储值资产";
+  saveAssetBtn.textContent = "保存资产";
+  assetOwnerSelect.value = getDefaultPerson();
+  assetUpdatedOnInput.value = getShanghaiDay();
+  assetFormPanel.hidden = false;
+  assetNameInput.focus();
+  assetFormPanel.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-async function handleReceiptImage(event) {
-  const sourceFiles = [...(event.target.files || [])];
-  if (!sourceFiles.length) return;
-  clearReceiptBatch();
+function startEditAsset(assetId) {
+  const asset = assets.find((item) => item.id === assetId && !item.deletedAt);
+  if (!asset) return;
+  editingAssetId = asset.id;
+  editingAssetBaseUpdatedAt = asset.updatedAt || "";
+  assetFormTitle.textContent = "编辑储值资产";
+  saveAssetBtn.textContent = "保存修改";
+  assetNameInput.value = asset.name;
+  assetTypeSelect.value = asset.assetType;
+  assetOwnerSelect.value = asset.owner;
+  assetBalanceInput.value = asset.balance;
+  assetUpdatedOnInput.value = asset.balanceUpdatedOn;
+  assetNoteInput.value = asset.note || "";
+  assetFormPanel.hidden = false;
+  assetFormPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+}
 
-  if (sourceFiles.length > 10) {
-    setReceiptScanStatus("为避免手机内存不足，每次最多选择 10 张单笔支付截图。", "error");
-    event.target.value = "";
+function closeAssetForm() {
+  editingAssetId = "";
+  editingAssetBaseUpdatedAt = "";
+  assetForm.reset();
+  assetFormPanel.hidden = true;
+  assetFormTitle.textContent = "新增储值资产";
+  saveAssetBtn.textContent = "保存资产";
+}
+
+async function saveAssetFromForm(event) {
+  event.preventDefault();
+  if (!canMutateLedger()) return;
+  const name = assetNameInput.value.trim();
+  const balance = Number.parseFloat(String(assetBalanceInput.value || "").replace(",", "."));
+  if (!name) {
+    assetNameInput.focus();
+    return;
+  }
+  if (!Number.isFinite(balance) || balance < 0) {
+    alert("当前余额必须是大于或等于 0 的数字。");
+    assetBalanceInput.focus();
+    return;
+  }
+  if (!assetUpdatedOnInput.value) {
+    assetUpdatedOnInput.focus();
     return;
   }
 
-  if (!window.Tesseract) {
-    setReceiptScanStatus("识别组件加载失败，请联网刷新页面后重试。", "error");
-    event.target.value = "";
+  const existingAsset = editingAssetId ? assets.find((item) => item.id === editingAssetId && !item.deletedAt) : null;
+  if (editingAssetId && !existingAsset) {
+    closeAssetForm();
     return;
   }
-
-  const files = sourceFiles.filter((file) => file.type.startsWith("image/") && file.size <= 25 * 1024 * 1024);
-  const invalidFileCount = sourceFiles.length - files.length;
-  if (!files.length) {
-    setReceiptScanStatus("没有可处理的图片。每张单笔支付截图需小于 25 MB。", "error");
-    event.target.value = "";
-    return;
-  }
-
-  const uploadLabel = receiptImageInput.closest(".receipt-upload");
-  uploadLabel.classList.add("is-busy");
-  receiptImageInput.disabled = true;
-  receiptUploadText.textContent = "正在识别…";
-  setReceiptScanStatus(`准备按顺序处理 ${files.length} 张单笔支付截图…`);
-
-  try {
-    const recognizedRecords = [];
-    let unreadableCount = invalidFileCount;
-    let listScreenshotCount = 0;
-
-    for (let index = 0; index < files.length; index += 1) {
-      let preparedImage = null;
-      try {
-        setReceiptScanStatus(`正在处理第 ${index + 1}/${files.length} 张：压缩图片…`);
-        preparedImage = await withReceiptTimeout(prepareReceiptImage(files[index]), 15000, "IMAGE_TIMEOUT");
-        setReceiptScanStatus(`正在处理第 ${index + 1}/${files.length} 张：识别文字…`);
-        const worker = await withReceiptTimeout(getReceiptOcrWorker(), 90000, "MODEL_TIMEOUT");
-        let result = await withReceiptTimeout(
-          worker.recognize(preparedImage.blob, {}, { text: true }),
-          45000,
-          "OCR_TIMEOUT"
-        );
-        const recognizedText = result.data.text || "";
-        result = null;
-        if (isReceiptListScreenshot(recognizedText)) {
-          listScreenshotCount += 1;
-          continue;
-        }
-        const parsed = parseReceiptText(recognizedText);
-        if (parsed.amount) recognizedRecords.push(parsed);
-        else unreadableCount += 1;
-      } catch (error) {
-        console.error(`Receipt OCR failed for image ${index + 1}`, error);
-        if (error?.code === "MODEL_TIMEOUT") throw error;
-        if (error?.code === "OCR_TIMEOUT") await resetReceiptOcrWorker();
-        unreadableCount += 1;
-      } finally {
-        preparedImage = null;
-      }
-    }
-
-    if (!recognizedRecords.length) {
-      const listHint = listScreenshotCount
-        ? `检测到 ${listScreenshotCount} 张流水列表截图，当前仅支持每张图片包含一笔支付详情。`
-        : "";
-      setReceiptScanStatus(
-        listHint || "这些截图中没有识别到可用金额，请换更清晰的单笔支付详情截图后重试。",
-        "error"
-      );
-    } else if (files.length === 1 && recognizedRecords.length === 1 && !unreadableCount && !listScreenshotCount) {
-      applyReceiptResult(recognizedRecords[0]);
-    } else {
-      applyReceiptBatchResult({ records: recognizedRecords, unreadableCount, listScreenshotCount });
-    }
-    scheduleReceiptWorkerRelease();
-  } catch (error) {
-    console.error("Receipt OCR failed", error);
-    if (["MODEL_TIMEOUT", "OCR_TIMEOUT"].includes(error?.code)) {
-      await resetReceiptOcrWorker();
-    }
-    setReceiptScanStatus(getReceiptErrorMessage(error), "error");
-  } finally {
-    uploadLabel.classList.remove("is-busy");
-    receiptImageInput.disabled = false;
-    receiptUploadText.textContent = "选择截图";
-    event.target.value = "";
-  }
-}
-
-async function prepareReceiptImage(file) {
-  const image = await decodeReceiptImage(file);
-  const sourceWidth = image.width || image.naturalWidth;
-  const sourceHeight = image.height || image.naturalHeight;
-  const maxEdge = 2200;
-  const maxPixels = 3000000;
-  const edgeScale = Math.min(1, maxEdge / Math.max(sourceWidth, sourceHeight));
-  const pixelScale = Math.min(1, Math.sqrt(maxPixels / (sourceWidth * sourceHeight)));
-  const scale = Math.min(edgeScale, pixelScale);
-  const width = Math.max(1, Math.round(sourceWidth * scale));
-  const height = Math.max(1, Math.round(sourceHeight * scale));
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const context = canvas.getContext("2d", { alpha: false });
-  if (!context) throw new Error("CANVAS_UNAVAILABLE");
-  context.fillStyle = "#fff";
-  context.fillRect(0, 0, width, height);
-  context.filter = "grayscale(1) contrast(1.15)";
-  context.drawImage(image, 0, 0, width, height);
-  if (typeof image.close === "function") image.close();
-
-  const blob = await new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (result) => (result ? resolve(result) : reject(new Error("IMAGE_COMPRESS_FAILED"))),
-      "image/jpeg",
-      0.9
-    );
-  });
-  canvas.width = 1;
-  canvas.height = 1;
-  return { blob, width, height, wasResized: scale < 0.99 };
-}
-
-async function decodeReceiptImage(file) {
-  if (window.createImageBitmap) {
-    try {
-      return await window.createImageBitmap(file, { imageOrientation: "from-image" });
-    } catch {
-      // Older mobile browsers may not accept imageOrientation; use the Image fallback.
-    }
-  }
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    const url = URL.createObjectURL(file);
-    image.onload = () => {
-      URL.revokeObjectURL(url);
-      resolve(image);
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error("IMAGE_DECODE_FAILED"));
-    };
-    image.src = url;
-  });
-}
-
-async function getReceiptOcrWorker() {
-  if (receiptOcrWorker) return receiptOcrWorker;
-  if (receiptOcrWorkerPromise) return receiptOcrWorkerPromise;
-
-  const attempt = ++receiptOcrWorkerAttempt;
-  const lstmOnlyMode = window.Tesseract.OEM?.LSTM_ONLY ?? 1;
-  receiptOcrWorkerPromise = window.Tesseract.createWorker("chi_sim", lstmOnlyMode, {
-    langPath: "https://tessdata.projectnaptha.com/4.0.0_fast",
-    logger: updateReceiptOcrProgress,
-    errorHandler(error) {
-      console.error("Receipt OCR worker error", error);
-    }
+  const now = new Date().toISOString();
+  let asset = normalizeAsset({
+    ...existingAsset,
+    id: existingAsset?.id || createUuid(),
+    name,
+    assetType: assetTypeSelect.value,
+    owner: assetOwnerSelect.value,
+    balance: roundMoney(balance),
+    balanceUpdatedOn: assetUpdatedOnInput.value,
+    note: assetNoteInput.value.trim(),
+    createdAt: existingAsset?.createdAt || now,
+    updatedAt: now,
+    createdBy: existingAsset?.createdBy || currentUser?.id || ""
   });
 
-  try {
-    const worker = await receiptOcrWorkerPromise;
-    if (attempt !== receiptOcrWorkerAttempt) {
-      await worker.terminate();
-      throw new Error("OCR_CANCELLED");
-    }
-    const autoPageSegmentation = String(window.Tesseract.PSM?.AUTO ?? 3);
-    await worker.setParameters({
-      preserve_interword_spaces: "1",
-      user_defined_dpi: "150",
-      tessedit_pageseg_mode: autoPageSegmentation
+  if (isCloudReady) {
+    const savedAsset = await saveCloudAsset(asset, {
+      isNew: !existingAsset,
+      baseUpdatedAt: editingAssetBaseUpdatedAt || existingAsset?.updatedAt || ""
     });
-    receiptOcrWorker = worker;
-    return worker;
-  } finally {
-    if (attempt === receiptOcrWorkerAttempt) receiptOcrWorkerPromise = null;
+    if (!savedAsset) return;
+    asset = savedAsset;
   }
+
+  assets = existingAsset ? assets.map((item) => (item.id === asset.id ? asset : item)) : [asset, ...assets];
+  saveAssets();
+  closeAssetForm();
+  render();
 }
 
-function updateReceiptOcrProgress(message) {
-  const progress = Math.max(0, Math.round((message.progress || 0) * 100));
-  const statusLabels = {
-    "loading tesseract core": "正在启动手机识别引擎",
-    "initializing tesseract": "正在初始化识别引擎",
-    "loading language traineddata": "首次使用，正在下载精简中文模型",
-    "initializing api": "正在准备中文识别",
-    "recognizing text": "正在识别截图文字"
-  };
-  const label = statusLabels[message.status];
-  if (!label) return;
-  setReceiptScanStatus(progress ? `${label} ${progress}%` : `${label}…`);
-}
-
-function withReceiptTimeout(promise, timeoutMs, code) {
-  let timeoutId;
-  const timeoutPromise = new Promise((_, reject) => {
-    timeoutId = window.setTimeout(() => {
-      const error = new Error(code);
-      error.code = code;
-      reject(error);
-    }, timeoutMs);
-  });
-  return Promise.race([promise, timeoutPromise]).finally(() => window.clearTimeout(timeoutId));
-}
-
-function scheduleReceiptWorkerRelease() {
-  window.clearTimeout(receiptOcrIdleTimer);
-  receiptOcrIdleTimer = window.setTimeout(() => {
-    resetReceiptOcrWorker();
-  }, 120000);
-}
-
-async function resetReceiptOcrWorker() {
-  window.clearTimeout(receiptOcrIdleTimer);
-  receiptOcrIdleTimer = null;
-  receiptOcrWorkerAttempt += 1;
-  const worker = receiptOcrWorker;
-  receiptOcrWorker = null;
-  receiptOcrWorkerPromise = null;
-  if (worker) {
-    await worker.terminate().catch(() => {});
+function renderAssets() {
+  const visibleAssets = assets
+    .filter((asset) => !asset.deletedAt)
+    .sort(
+      (left, right) =>
+        (right.balanceUpdatedOn || "").localeCompare(left.balanceUpdatedOn || "") ||
+        (right.updatedAt || "").localeCompare(left.updatedAt || "")
+    );
+  assetCount.textContent = String(visibleAssets.length);
+  assetBalanceTotal.textContent = money(visibleAssets.reduce((total, asset) => total + asset.balance, 0));
+  if (!visibleAssets.length) {
+    assetList.innerHTML = '<div class="empty-state">还没有储值资产，先新增一个。</div>';
+    return;
   }
-}
 
-function getReceiptErrorMessage(error) {
-  if (error?.code === "MODEL_TIMEOUT") {
-    return "中文模型加载超过 90 秒，请切换网络或刷新页面后重试。识别任务已自动停止。";
-  }
-  if (error?.code === "OCR_TIMEOUT") {
-    return "手机识别超过 45 秒，任务已自动停止。请裁剪掉截图中无关区域后重试。";
-  }
-  if (error?.code === "IMAGE_TIMEOUT") {
-    return "手机处理图片超时，请在相册中裁剪截图或降低图片大小后重试。";
-  }
-  if (["IMAGE_DECODE_FAILED", "IMAGE_COMPRESS_FAILED", "CANVAS_UNAVAILABLE"].includes(error?.message)) {
-    return "这张图片无法在当前浏览器中处理，请换用 JPG 或 PNG 截图。";
-  }
-  return "没有成功识别这张截图，请检查网络，或换一张更清晰、包含金额和时间的截图。";
-}
-
-function parseReceiptText(rawText) {
-  const text = String(rawText || "")
-    .replace(/[，]/g, ",")
-    .replace(/[：]/g, ":")
-    .replace(/[￥]/g, "¥");
-  const compactText = text.replace(/\s+/g, " ");
-  const type = inferReceiptType(compactText);
-  const amount = inferReceiptAmount(text);
-  const date = inferReceiptDate(compactText);
-  const category = inferReceiptCategory(compactText, type);
-  const note = inferReceiptNote(text, category);
-  return { type, amount, date, ...category, note };
-}
-
-function isReceiptListScreenshot(rawText) {
-  const lines = String(rawText || "")
-    .replace(/[，]/g, ",")
-    .replace(/[：]/g, ":")
-    .split(/\r?\n/)
-    .map((line) => line.replace(/\s+/g, " ").trim())
-    .filter(Boolean);
-  const datedLines = lines.filter((line) =>
-    /(?:20\d{2}[-/.年]\d{1,2}[-/.月]\d{1,2}|\d{1,2}[-/]\d{1,2})\D{0,8}\d{1,2}:\d{2}/.test(line)
-  );
-  const amountLines = lines.filter(
-    (line) =>
-      !/\d{1,2}[-/]\d{1,2}\D{0,8}\d{1,2}:\d{2}/.test(line) &&
-      /(?:^|\s)[+＋\-−–—]?\s*[¥￥]?\s*\d[\d,]*\.\d{1,2}(?:\s|$)/.test(line)
-  );
-  return datedLines.length >= 2 && amountLines.length >= 2;
-}
-
-function inferReceiptType(text) {
-  const compactText = String(text || "").replace(/\s+/g, "").replace(/[·•丨|]/g, "");
-  const incomeKeywords = [
-    "收款成功",
-    "已收款",
-    "收入",
-    "到账",
-    "转入",
-    "退款成功",
-    "退款到账",
-    "对方向你转账",
-    "余额宝收益",
-    "收益发放",
-    "收益到账",
-    "利息收入"
-  ];
-  return incomeKeywords.some((keyword) => compactText.includes(keyword)) ? "income" : "expense";
-}
-
-function inferReceiptAmount(text) {
-  const priorityPatterns = [
-    /(?:实付|支付金额|付款金额|订单金额|交易金额|合计|金额|收款)[^\d¥￥]{0,10}[¥￥]?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/gi,
-    /[¥￥]\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/g,
-    /[-−–—﹣－]\s*[¥￥]?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/g
-  ];
-  for (const pattern of priorityPatterns) {
-    const matches = [...text.matchAll(pattern)]
-      .map((match) => parseOcrAmountToken(match[1]))
-      .filter((value) => Number.isFinite(value) && value > 0 && value < 10000000);
-    if (matches.length) return Math.max(...matches);
-  }
-  return null;
-}
-
-function parseOcrAmountToken(value) {
-  const token = String(value || "").replace(/\s+/g, "");
-  if (/^\d+,\d{1,2}$/.test(token)) return Number.parseFloat(token.replace(",", "."));
-  return Number.parseFloat(token.replaceAll(",", ""));
-}
-
-function inferReceiptDate(text) {
-  const fullDateMatch = text.match(/(20\d{2})\s*[年./-]\s*(\d{1,2})\s*[月./-]\s*(\d{1,2})\s*日?/);
-  if (fullDateMatch) return toValidDate(fullDateMatch[1], fullDateMatch[2], fullDateMatch[3]);
-
-  const currentYear = Number(getShanghaiDay().slice(0, 4));
-  const shortDateMatches = text.matchAll(
-    /(?:交易时间|支付时间|创建时间|付款时间|日期)?[^\d]{0,6}(\d{1,2})\s*[月./-]\s*(\d{1,2})\s*日?/g
-  );
-  for (const shortDateMatch of shortDateMatches) {
-    let candidate = toValidDate(currentYear, shortDateMatch[1], shortDateMatch[2]);
-    if (!candidate) continue;
-    if (candidate > getShanghaiDay()) {
-      candidate = toValidDate(currentYear - 1, shortDateMatch[1], shortDateMatch[2]);
-    }
-    if (candidate) return candidate;
-  }
-  return "";
-}
-
-function toValidDate(year, month, day) {
-  const value = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-  const parsed = new Date(`${value}T12:00:00+08:00`);
-  return Number.isNaN(parsed.getTime()) || getShanghaiDay(parsed) !== value ? "" : value;
-}
-
-function inferReceiptCategory(text, type) {
-  const rules =
-    type === "income"
-      ? [
-          { words: ["工资", "薪资", "薪酬"], major: "工资", minor: "工资" },
-          { words: ["奖金", "年终奖"], major: "工资", minor: "奖金" },
-          { words: ["补贴", "津贴"], major: "工资", minor: "补贴" },
-          { words: ["利息", "余额宝", "收益"], major: "理财", minor: "利息" },
-          { words: ["基金", "股票", "证券"], major: "理财", minor: "基金股票" },
-          { words: ["分红"], major: "理财", minor: "分红" },
-          { words: ["报销", "交通费"], major: "报销", minor: "其他报销" },
-          { words: ["退款", "退回"], major: "其他", minor: "退款" },
-          { words: ["转账", "收款"], major: "其他", minor: "转账" }
-        ]
-      : [
-          { words: ["地铁", "公交", "轨道交通"], major: "交通", minor: "地铁公交" },
-          { words: ["滴滴", "打车", "出租车", "网约车"], major: "交通", minor: "打车" },
-          { words: ["加油", "充电站", "充电桩"], major: "交通", minor: "加油充电" },
-          { words: ["停车"], major: "交通", minor: "停车" },
-          { words: ["铁路", "高铁", "机票", "航空"], major: "交通", minor: "高铁机票" },
-          {
-            words: ["咖啡", "奶茶", "茶饮", "瑞幸", "星巴克", "茶百道", "霸王茶姬", "喜茶", "盒补补", "原浆饮"],
-            major: "餐饮",
-            minor: "咖啡奶茶"
-          },
-          { words: ["早餐", "包子", "豆浆"], major: "餐饮", minor: "早餐" },
-          { words: ["午餐", "午饭"], major: "餐饮", minor: "午餐" },
-          { words: ["晚餐", "晚饭", "夜宵"], major: "餐饮", minor: "晚餐" },
-          { words: ["超市", "买菜", "生鲜", "菜场", "盒马"], major: "餐饮", minor: "买菜" },
-          { words: ["水果", "零食"], major: "餐饮", minor: "水果零食" },
-          { words: ["餐饮", "美团外卖", "饿了么", "饭店", "餐厅", "小吃"], major: "餐饮", minor: "午餐" },
-          { words: ["房租", "房贷"], major: "居家", minor: "房租房贷" },
-          { words: ["水费", "电费", "燃气"], major: "居家", minor: "水电燃气" },
-          { words: ["话费", "中国移动", "中国联通", "中国电信"], major: "居家", minor: "话费" },
-          { words: ["医院", "诊所", "挂号"], major: "医疗", minor: "挂号" },
-          { words: ["药房", "药店", "医药"], major: "医疗", minor: "药品" },
-          { words: ["电影", "影院", "演出"], major: "娱乐", minor: "电影演出" },
-          { words: ["酒店", "旅行", "景区"], major: "娱乐", minor: "旅行" },
-          { words: ["淘宝", "天猫", "京东", "拼多多", "购物", "无印良品", "MUJI", "日用百货"], major: "购物", minor: "日用品" },
-          { words: ["红包"], major: "人情", minor: "红包" }
-        ];
-  const matchedRule = rules.find((rule) => rule.words.some((word) => text.includes(word)));
-  return matchedRule || { major: "其他", minor: type === "income" ? "未分类" : "未分类" };
-}
-
-function inferReceiptNote(text, category) {
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.replace(/\s+/g, " ").trim())
-    .filter(Boolean);
-  const labeledLine = lines.find((line) => /(?:收款方|商户|交易对方|付款给|商品说明|订单名称|商品)/.test(line));
-  if (labeledLine) {
-    const note = labeledLine.replace(/^.*?(?:收款方|商户|交易对方|付款给|商品说明|订单名称|商品)\s*[:：]?\s*/, "").trim();
-    if (note) return note.slice(0, 60);
-  }
-  const ignored = /(?:支付成功|交易成功|付款成功|账单详情|订单详情|支付金额|付款金额|交易金额|实付|¥|￥|\d{1,4}[年./-]\d{1,2})/;
-  const candidate = lines.find((line) => line.length >= 2 && line.length <= 40 && !ignored.test(line));
-  return (candidate || `${category.major}/${category.minor}（截图识别）`).slice(0, 60);
-}
-
-function applyReceiptResult(result) {
-  clearReceiptBatch();
-  setActiveType(result.type);
-  if (result.amount) amountInput.value = result.amount.toFixed(2);
-  if (result.date) entryDateInput.value = result.date;
-  if (categoryMap[result.type]?.[result.major]) {
-    majorSelect.value = result.major;
-    fillMinorCategories();
-    if (categoryMap[result.type][result.major].includes(result.minor)) {
-      minorSelect.value = result.minor;
-    }
-  }
-  syncTripProjectField();
-  if (result.note) noteInput.value = result.note;
-
-  const filled = [
-    result.amount ? `金额 ${money(result.amount)}` : "",
-    result.date ? formatDay(result.date) : "",
-    result.type === "income" ? "收入" : "支出",
-    `${displayCategory(result.major)} / ${displayMinor(result.minor)}`
-  ].filter(Boolean);
-  const missingAmountHint = result.amount ? "" : "；未找到金额，请手动填写";
-  setReceiptScanStatus(`已填入：${filled.join(" · ")}${missingAmountHint}。请核对后再保存。`, result.amount ? "success" : "error");
-  amountInput.focus();
-}
-
-function applyReceiptBatchResult(result) {
-  pendingReceiptRecords = result.records;
-  receiptBatchPanel.hidden = false;
-  receiptBatchTitle.textContent = `已从 ${pendingReceiptRecords.length} 张截图识别出记录`;
-  receiptBatchList.innerHTML = pendingReceiptRecords
+  assetList.innerHTML = visibleAssets
     .map(
-      (record, index) => `
-        <label class="receipt-batch-item">
-          <input type="checkbox" data-batch-index="${index}" checked />
-          <span class="receipt-batch-copy">
-            <strong>${escapeHtml(record.note)}</strong>
-            <span>${escapeHtml(formatDay(record.date))} · ${record.type === "income" ? "收入" : "支出"} · ${escapeHtml(
-              `${displayCategory(record.major)} / ${displayMinor(record.minor)}`
-            )}</span>
-          </span>
-          <strong class="receipt-batch-money ${record.type === "income" ? "income" : ""}">
-            ${record.type === "income" ? "+" : "-"}${escapeHtml(money(record.amount))}
-          </strong>
-        </label>
+      (asset) => `
+        <article class="asset-card" data-asset-id="${escapeHtml(asset.id)}">
+          <div class="asset-card-icon">${escapeHtml(assetTypeLabels[asset.assetType]?.slice(0, 2).trim() || "💳")}</div>
+          <div class="asset-card-copy">
+            <strong>${escapeHtml(asset.name)}</strong>
+            <span>${escapeHtml(assetTypeLabels[asset.assetType] || asset.assetType)} · ${escapeHtml(displayAssetOwner(asset.owner))} · ${escapeHtml(formatDay(asset.balanceUpdatedOn))}</span>
+            ${asset.note ? `<small>${escapeHtml(asset.note)}</small>` : ""}
+          </div>
+          <div class="asset-card-balance">${escapeHtml(money(asset.balance))}</div>
+          <div class="asset-card-actions">
+            <button class="asset-edit" type="button">编辑</button>
+            <button class="asset-delete" type="button">删除</button>
+          </div>
+        </article>
       `
     )
     .join("");
-  updateReceiptBatchButton();
-  const unreadableHint = result.unreadableCount ? `，${result.unreadableCount} 张未识别或格式不符合要求` : "";
-  const listHint = result.listScreenshotCount ? `，${result.listScreenshotCount} 张流水列表截图已跳过` : "";
-  setReceiptScanStatus(
-    `已识别 ${pendingReceiptRecords.length} 张单笔截图${unreadableHint}${listHint}。请核对后加入账本。`,
-    "success"
-  );
 }
 
-function updateReceiptBatchButton() {
-  const selectedCount = receiptBatchList.querySelectorAll("[data-batch-index]:checked").length;
-  receiptBatchAddBtn.disabled = selectedCount === 0;
-  receiptBatchAddBtn.textContent = selectedCount ? `加入选中的 ${selectedCount} 条` : "请至少选择一条";
-}
-
-function clearReceiptBatch() {
-  pendingReceiptRecords = [];
-  receiptBatchList.innerHTML = "";
-  receiptBatchPanel.hidden = true;
-  receiptBatchAddBtn.disabled = false;
-  receiptBatchAddBtn.textContent = "加入选中记录";
-}
-
-async function importSelectedReceiptRecords() {
-  if (!canMutateLedger()) return;
-  const selectedIndexes = [...receiptBatchList.querySelectorAll("[data-batch-index]:checked")].map((input) =>
-    Number(input.dataset.batchIndex)
-  );
-  const selectedItems = selectedIndexes.map((index) => pendingReceiptRecords[index]).filter(Boolean);
-  if (!selectedItems.length) {
-    setReceiptScanStatus("请至少勾选一条流水。", "error");
+async function handleAssetAction(event) {
+  const button = event.target.closest("button");
+  const card = event.target.closest(".asset-card");
+  if (!button || !card) return;
+  const asset = assets.find((item) => item.id === card.dataset.assetId && !item.deletedAt);
+  if (!asset) return;
+  if (button.classList.contains("asset-edit")) {
+    startEditAsset(asset.id);
     return;
   }
-
-  receiptBatchAddBtn.disabled = true;
-  const baseTime = Date.now();
-  let importedRecords = selectedItems.map((item, index) => ({
-    id: createUuid(),
-    type: item.type,
-    person: personSelect.value,
-    amount: Math.round(item.amount * 100) / 100,
-    benefit: item.type === "expense" ? benefitSelect.value || `${personSelect.value}用` : "",
-    major: item.major,
-    minor: item.minor,
-    note: item.note,
-    date: item.date || getShanghaiDay(),
-    createdAt: new Date(baseTime + index).toISOString(),
-    updatedAt: new Date(baseTime + index).toISOString(),
-    createdBy: currentUser?.id || ""
-  }));
-
-  if (isCloudReady) {
-    const savedRecords = await insertCloudRecords(importedRecords);
-    if (!savedRecords) {
-      receiptBatchAddBtn.disabled = false;
-      return;
-    }
-    importedRecords = savedRecords;
-  }
-  records = [...importedRecords, ...records];
-  saveRecords();
+  if (!button.classList.contains("asset-delete") || !canMutateLedger()) return;
+  if (!confirm(`确定删除“${asset.name}”吗？`)) return;
+  if (isCloudReady && !(await deleteCloudAsset(asset))) return;
+  assets = assets.filter((item) => item.id !== asset.id);
+  if (editingAssetId === asset.id) closeAssetForm();
+  saveAssets();
   render();
-  clearReceiptBatch();
-  setReceiptScanStatus(`已将 ${importedRecords.length} 条流水加入账本。`, "success");
 }
 
 function renderRecordList(listNode, items, options = {}) {
@@ -2330,8 +1971,7 @@ function renderRecordList(listNode, items, options = {}) {
     node.querySelector(".record-icon").textContent = displayCategory(record.major).slice(0, 2).trim();
     node.querySelector(".record-title").textContent = `${displayCategory(record.major)} / ${displayMinor(record.minor)}`;
     node.querySelector(".record-meta").textContent = [
-      `${displayPerson(record.person)}记账`,
-      displayBenefit(record.benefit),
+      displayPersonEmoji(record.person),
       formatDay(getRecordDay(record)),
       record.note
     ]
@@ -2361,7 +2001,6 @@ function getRecordSearchText(record) {
     record.type === "income" ? "收入" : "支出",
     record.person,
     record.amount,
-    record.benefit,
     record.major,
     record.minor,
     record.note,
@@ -2379,10 +2018,7 @@ async function applyPreferredPersonForCurrentUser() {
     preferredPerson = matchedPerson;
     localStorage.setItem(`${storageKey}-preferred-person`, preferredPerson);
   }
-  if (!editingRecordId) {
-    personSelect.value = getDefaultPerson();
-    benefitSelect.value = getDefaultBenefit();
-  }
+  if (!editingRecordId) personSelect.value = getDefaultPerson();
 }
 
 async function getMatchedPersonForEmail(email) {
@@ -2401,10 +2037,6 @@ async function sha256Hex(value) {
 
 function getDefaultPerson() {
   return people.includes(preferredPerson) ? preferredPerson : people[0];
-}
-
-function getDefaultBenefit() {
-  return `${getDefaultPerson()}用`;
 }
 
 async function handleRecordAction(event) {
@@ -2446,7 +2078,6 @@ function startEdit(recordId) {
   personSelect.value = record.person;
   amountInput.value = record.amount;
   entryDateInput.value = getRecordDay(record);
-  benefitSelect.value = normalizeBenefit(record);
   majorSelect.value = record.major;
   fillMinorCategories();
   minorSelect.value = record.minor;
@@ -2558,7 +2189,7 @@ function canMutateLedger() {
 }
 
 function refreshCloudWhenForeground() {
-  if (!isCloudReady || cloudSyncPromise || editingRecordId || editingTripId) return;
+  if (!isCloudReady || cloudSyncPromise || editingRecordId || editingTripId || editingAssetId) return;
   if (Date.now() - lastSuccessfulSyncAt < 15000) return;
   syncCloudRecords({ quiet: true });
 }
@@ -2636,6 +2267,16 @@ async function syncCloudRecords(options = {}) {
 async function pullCloudRecords(options = {}) {
   if (!options.quiet) setCloudState("正在同步", "正在直接读取云端账本，本机缓存不会上传。");
 
+  const { data: assetRows, error: assetError } = await supabaseClient
+    .from("stored_assets")
+    .select(cloudAssetFields)
+    .eq("family_id", familyId)
+    .order("balance_updated_on", { ascending: false });
+  if (assetError) {
+    setCloudState("储值资产同步失败", formatCloudSchemaError(assetError));
+    return false;
+  }
+
   const { data: tripRows, error: tripError } = await supabaseClient
     .from("business_trips")
     .select(cloudTripFields)
@@ -2658,9 +2299,11 @@ async function pullCloudRecords(options = {}) {
   }
 
   trips = (tripRows || []).map(fromCloudTrip).filter(isTrip).map(normalizeTrip);
+  assets = (assetRows || []).map(fromCloudAsset).filter(isAsset).map(normalizeAsset).filter((asset) => !asset.deletedAt);
   records = migrateRecords((recordRows || []).map(fromCloudRecord).filter(isRecord).filter((record) => !record.deletedAt));
   if (activeTripId && !trips.some((trip) => trip.id === activeTripId && !trip.deletedAt)) activeTripId = "";
   saveTrips();
+  saveAssets();
   saveRecords();
   render();
   lastSuccessfulSyncAt = Date.now();
@@ -2787,6 +2430,46 @@ async function saveCloudTrip(trip, options = {}) {
   return savedTrip;
 }
 
+async function saveCloudAsset(asset, options = {}) {
+  if (!isCloudReady) return asset;
+  lastCloudAssetError = null;
+  if (!options.quiet) setCloudState("正在保存", "正在写入储值资产。");
+
+  let response;
+  if (options.isNew) {
+    response = await supabaseClient.from("stored_assets").insert(toCloudAsset(asset)).select(cloudAssetFields);
+  } else {
+    const baseUpdatedAt = options.baseUpdatedAt || asset.updatedAt || "";
+    if (!baseUpdatedAt) {
+      lastCloudAssetError = { code: "MISSING_VERSION", message: "储值资产缺少云端版本" };
+      setCloudState("无法安全保存", "这个储值资产缺少云端版本，请先点“同步”后再试。");
+      return null;
+    }
+    response = await supabaseClient
+      .from("stored_assets")
+      .update(toCloudAsset(asset))
+      .eq("family_id", familyId)
+      .eq("id", asset.id)
+      .eq("updated_at", baseUpdatedAt)
+      .select(cloudAssetFields);
+  }
+
+  if (response.error) {
+    lastCloudAssetError = response.error;
+    setCloudState("储值资产保存失败", `${formatCloudSchemaError(response.error)}；本机界面没有写入这次修改。`);
+    return null;
+  }
+  if (!response.data?.length) {
+    lastCloudAssetError = { code: "VERSION_CONFLICT", message: "云端储值资产已更新" };
+    await handleCloudVersionConflict("这个储值资产已被另一台设备修改或删除", { assetId: asset.id });
+    return null;
+  }
+
+  const savedAsset = fromCloudAsset(response.data[0]);
+  if (!options.quiet) setCloudReadyState("刚刚保存");
+  return savedAsset;
+}
+
 async function deleteCloudRecord(record) {
   if (!isCloudReady) return true;
   if (!record?.updatedAt) {
@@ -2814,7 +2497,34 @@ async function deleteCloudRecord(record) {
   return true;
 }
 
-async function restoreBackupToCloud(recordItems, tripItems) {
+async function deleteCloudAsset(asset) {
+  if (!isCloudReady) return true;
+  if (!asset?.updatedAt) {
+    setCloudState("无法安全删除", "这个储值资产缺少云端版本，请先点“同步”后再试。");
+    return false;
+  }
+  setCloudState("正在删除", "正在从云端删除这个储值资产。");
+  const deletedAt = new Date().toISOString();
+  const { data, error } = await supabaseClient
+    .from("stored_assets")
+    .update({ deleted_at: deletedAt, updated_at: deletedAt })
+    .eq("family_id", familyId)
+    .eq("id", asset.id)
+    .eq("updated_at", asset.updatedAt)
+    .select("id");
+  if (error) {
+    setCloudState("删除储值资产失败", formatCloudSchemaError(error));
+    return false;
+  }
+  if (!data?.length) {
+    await handleCloudVersionConflict("这个储值资产已被另一台设备修改或删除", { assetId: asset.id });
+    return false;
+  }
+  setCloudReadyState("刚刚删除");
+  return true;
+}
+
+async function restoreBackupToCloud(recordItems, tripItems, assetItems) {
   if (!isCloudReady) return false;
   setCloudState("正在恢复备份", "正在把选定 JSON 明确写入云端；这不是普通同步。");
   const baseTime = Date.now();
@@ -2834,10 +2544,25 @@ async function restoreBackupToCloud(recordItems, tripItems) {
     }
   }
 
+  if (assetItems?.length) {
+    const restoredAssets = assetItems.map((asset, index) =>
+      normalizeAsset({
+        ...asset,
+        updatedAt: new Date(baseTime + (tripItems?.length || 0) + index).toISOString(),
+        createdBy: currentUser.id
+      })
+    );
+    const { error } = await supabaseClient.from("stored_assets").upsert(restoredAssets.map(toCloudAsset), { onConflict: "id" });
+    if (error) {
+      setCloudState("储值资产恢复失败", formatCloudSchemaError(error));
+      return false;
+    }
+  }
+
   if (recordItems.length) {
     const restoredRecords = recordItems.map((record, index) => ({
       ...record,
-      updatedAt: new Date(baseTime + (tripItems?.length || 0) + index).toISOString(),
+      updatedAt: new Date(baseTime + (tripItems?.length || 0) + (assetItems?.length || 0) + index).toISOString(),
       createdBy: currentUser.id
     }));
     const { error } = await supabaseClient.from("records").upsert(restoredRecords.map(toCloudRecord), { onConflict: "id" });
@@ -2861,6 +2586,10 @@ async function handleCloudVersionConflict(message, target = {}) {
   }
   if (target.tripId && editingTripId === target.tripId) {
     closeTripForm();
+    closedEditor = true;
+  }
+  if (target.assetId && editingAssetId === target.assetId) {
+    closeAssetForm();
     closedEditor = true;
   }
   if (closedEditor) render();
@@ -2965,9 +2694,45 @@ function fromCloudTrip(row) {
   });
 }
 
+function toCloudAsset(asset) {
+  return {
+    id: asset.id,
+    family_id: familyId,
+    name: asset.name,
+    asset_type: asset.assetType,
+    owner: asset.owner,
+    balance: asset.balance,
+    note: asset.note || "",
+    balance_updated_on: asset.balanceUpdatedOn,
+    deleted_at: asset.deletedAt || null,
+    created_at: asset.createdAt || new Date().toISOString(),
+    updated_at: asset.updatedAt || asset.createdAt || new Date().toISOString(),
+    created_by: asset.createdBy || currentUser.id
+  };
+}
+
+function fromCloudAsset(row) {
+  return normalizeAsset({
+    id: row.id,
+    name: row.name,
+    assetType: row.asset_type,
+    owner: row.owner,
+    balance: Number(row.balance || 0),
+    note: row.note || "",
+    balanceUpdatedOn: row.balance_updated_on,
+    deletedAt: row.deleted_at || "",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at || row.created_at || "",
+    createdBy: row.created_by || ""
+  });
+}
+
 function formatCloudSchemaError(error) {
   const message = String(error?.message || "云端操作失败");
   const lowerMessage = message.toLowerCase();
+  if (lowerMessage.includes("stored_assets") || lowerMessage.includes("asset_type") || lowerMessage.includes("balance_updated_on")) {
+    return "云端还没有储值资产模块的数据表，请先在 Supabase SQL Editor 重新运行新版 supabase-schema.sql";
+  }
   if (lowerMessage.includes("updated_at") || lowerMessage.includes("deleted_at")) {
     return "云端缺少多设备同步所需的版本字段，请先在 Supabase SQL Editor 重新运行新版 supabase-schema.sql";
   }
@@ -2978,7 +2743,7 @@ function formatCloudSchemaError(error) {
 }
 
 function getLedgerCountLabel() {
-  return `${records.length} 条账目 · ${trips.filter((trip) => !trip.deletedAt).length} 个出差项目`;
+  return `${records.length} 条账目 · ${trips.filter((trip) => !trip.deletedAt).length} 个出差项目 · ${assets.filter((asset) => !asset.deletedAt).length} 个储值资产`;
 }
 
 function sum(items, type) {
@@ -3109,7 +2874,8 @@ function escapeHtml(value) {
 function getLedgerStorageSize() {
   return new Blob([
     localStorage.getItem(storageKey) || "",
-    localStorage.getItem(tripStorageKey) || ""
+    localStorage.getItem(tripStorageKey) || "",
+    localStorage.getItem(assetStorageKey) || ""
   ]).size;
 }
 
@@ -3123,6 +2889,10 @@ function displayPerson(person) {
   return personLabels[person] || person;
 }
 
+function displayPersonEmoji(person) {
+  return person === "徐佳丹" ? "👧" : person === "李逍宇" ? "👦" : "";
+}
+
 function displayCategory(category) {
   return categoryLabels[category] || category;
 }
@@ -3131,8 +2901,8 @@ function displayMinor(minor) {
   return minorLabels[minor] || minor;
 }
 
-function displayBenefit(benefit) {
-  return benefitLabels[benefit] || benefit;
+function displayAssetOwner(owner) {
+  return owner === "共同" ? "👫 共同" : displayPerson(owner);
 }
 
 function loadRecords() {
@@ -3165,6 +2935,48 @@ function loadTrips() {
 
 function saveTrips() {
   localStorage.setItem(tripStorageKey, JSON.stringify(trips));
+}
+
+function loadAssets() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(assetStorageKey) || "[]");
+    return Array.isArray(parsed) ? parsed.filter(isAsset).map(normalizeAsset) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveAssets() {
+  localStorage.setItem(assetStorageKey, JSON.stringify(assets));
+}
+
+function normalizeAsset(asset) {
+  return {
+    ...asset,
+    balance: roundMoney(Number(asset.balance || 0)),
+    note: asset.note || "",
+    deletedAt: asset.deletedAt || "",
+    updatedAt: asset.updatedAt || asset.createdAt || "",
+    createdBy: asset.createdBy || ""
+  };
+}
+
+function isAsset(asset) {
+  return (
+    asset &&
+    typeof asset.id === "string" &&
+    typeof asset.name === "string" &&
+    ["membership", "stored_value", "digital"].includes(asset.assetType) &&
+    [...people, "共同"].includes(asset.owner) &&
+    Number.isFinite(Number(asset.balance)) &&
+    Number(asset.balance) >= 0 &&
+    /^\d{4}-\d{2}-\d{2}$/.test(asset.balanceUpdatedOn) &&
+    (typeof asset.note === "string" || typeof asset.note === "undefined") &&
+    (typeof asset.deletedAt === "string" || typeof asset.deletedAt === "undefined") &&
+    (typeof asset.createdAt === "string" || typeof asset.createdAt === "undefined") &&
+    (typeof asset.updatedAt === "string" || typeof asset.updatedAt === "undefined") &&
+    (typeof asset.createdBy === "string" || typeof asset.createdBy === "undefined")
+  );
 }
 
 function normalizeTrip(trip) {
@@ -3217,23 +3029,6 @@ function isDailyRecord(record) {
   return !isTripProjectRecord(record);
 }
 
-function syncBenefitField() {
-  const isExpense = activeType === "expense";
-  benefitField.hidden = !isExpense;
-  benefitSelect.disabled = !isExpense;
-  if (isExpense && !benefitSelect.value) {
-    benefitSelect.value = getDefaultBenefit();
-  }
-}
-
-function syncBenefitWithPerson() {
-  if (activeType !== "expense") return;
-  const individualBenefits = people.map((person) => `${person}用`);
-  if (!benefitSelect.value || individualBenefits.includes(benefitSelect.value)) {
-    benefitSelect.value = `${personSelect.value}用`;
-  }
-}
-
 function migrateRecords(items) {
   return items.map((record) => normalizeRecordBenefit(normalizeRecord(record)));
 }
@@ -3253,15 +3048,7 @@ function normalizeRecord(record) {
 }
 
 function normalizeRecordBenefit(record) {
-  const nextBenefit = normalizeBenefit(record);
-  if (nextBenefit === (record.benefit || "")) return record;
-  return { ...record, benefit: nextBenefit };
-}
-
-function normalizeBenefit(record) {
-  if (record.type !== "expense") return "";
-  if (record.benefit && record.benefit !== "自己用") return record.benefit;
-  return people.includes(record.person) ? `${record.person}用` : getDefaultBenefit();
+  return record.benefit ? { ...record, benefit: "" } : record;
 }
 
 function hasBenefitMigration(beforeItems, afterItems) {
@@ -3300,7 +3087,6 @@ updateDateRangeText();
 updateDetailDateRangeText();
 updateDetailAmountSortButton();
 renderCalendar();
-syncBenefitField();
 fillMajorCategories();
 fillDetailCategories();
 fillTripProjectOptions();

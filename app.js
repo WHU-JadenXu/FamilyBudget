@@ -10,21 +10,32 @@ const categoryMap = {
     餐饮: ["早餐", "午餐", "晚餐", "买菜", "水果零食", "咖啡奶茶"],
     交通: ["地铁公交", "打车", "加油充电", "停车", "高铁机票"],
     出差: ["出差吃饭", "出差住宿", "出差交通", "出差其他"],
-    居家: ["房租房贷", "水电燃气", "网费", "话费", "会员费", "物业", "家政", "维修"],
+    居家: ["房租房贷", "水电燃气", "网费", "话费", "软件订阅AI", "物业", "家政", "维修"],
     购物: ["日用品", "服饰", "数码", "护肤美妆", "礼物"],
-    医疗: ["挂号", "药品", "体检", "保险"],
+    医疗: ["挂号", "药品", "体检", "保险", "保健品"],
     娱乐: ["电影演出", "旅行", "游戏会员", "聚会", "运动"],
     人情: ["红包", "请客", "父母家人", "朋友往来"],
-    其他: ["未分类", "快递", "出差未报销"]
+    其他: ["未分类", "快递"]
   },
   income: {
     工资: ["工资", "奖金", "补贴"],
-    理财: ["利息", "基金股票", "分红"],
-    出差: ["报销", "其他"],
-    报销: ["交通报销", "餐费报销", "其他报销", "出差结余"],
-    其他: ["转账", "退款", "未分类"]
+    报销: ["出差报销", "出差补贴", "其他报销"],
+    其他: ["转账", "退款", "二手卖出", "未分类"]
   }
 };
+
+// Old category names still stored on records. Display, filters, and totals use the new names.
+// 工资/补贴 stays a normal allowance unless the row is the trip-settlement surplus.
+const categoryAliases = [
+  { type: "expense", major: "居家", minor: "会员费", nextMajor: "居家", nextMinor: "软件订阅AI" },
+  { type: "expense", major: "其他", minor: "出差未报销", nextMajor: "其他", nextMinor: "未分类" },
+  { type: "income", major: "出差", minor: "报销", nextMajor: "报销", nextMinor: "出差报销" },
+  { type: "income", major: "出差", minor: "其他", nextMajor: "报销", nextMinor: "出差报销" },
+  { type: "income", major: "报销", minor: "交通报销", nextMajor: "报销", nextMinor: "其他报销" },
+  { type: "income", major: "报销", minor: "餐费报销", nextMajor: "报销", nextMinor: "其他报销" },
+  { type: "income", major: "报销", minor: "出差结余", nextMajor: "报销", nextMinor: "出差补贴" },
+  { type: "income", major: "工资", minor: "补贴", tripRole: "settlement", nextMajor: "报销", nextMinor: "出差补贴" }
+];
 
 const categoryLabels = {
   餐饮: "🍜 餐饮",
@@ -61,6 +72,7 @@ const minorLabels = {
   水电燃气: "💡 水电燃气",
   网费: "🌐 网费",
   话费: "📱 话费",
+  软件订阅AI: "🤖 软件订阅AI",
   会员费: "⭐ 会员费",
   物业: "🔑 物业",
   家政: "🧹 家政",
@@ -74,6 +86,7 @@ const minorLabels = {
   药品: "💊 药品",
   体检: "🩺 体检",
   保险: "🛡️ 保险",
+  保健品: "🌿 保健品",
   电影演出: "🎬 电影演出",
   旅行: "🧳 旅行",
   游戏会员: "🎮 游戏会员",
@@ -93,13 +106,16 @@ const minorLabels = {
   分红: "💵 分红",
   交通报销: "🚇 交通报销",
   餐费报销: "🍱 餐费报销",
+  出差报销: "🧳 出差报销",
+  出差补贴: "💼 出差补贴",
   其他报销: "🧾 其他报销",
   报销: "🧾 报销",
   其他: "📎 其他",
   出差结余: "💼 出差结余",
   出差未报销: "📉 出差未报销",
   转账: "↔️ 转账",
-  退款: "↩️ 退款"
+  退款: "↩️ 退款",
+  二手卖出: "♻️ 二手卖出"
 };
 
 const assetTypeLabels = {
@@ -292,6 +308,9 @@ majorSelect.addEventListener("change", () => {
   fillMinorCategories();
   syncTripProjectField();
   syncAssetFlowField();
+});
+minorSelect.addEventListener("change", () => {
+  syncTripProjectField();
 });
 assetFlowSelect.addEventListener("change", () => syncAssetFlowField());
 assetTargetSelect.addEventListener("change", updateAssetFlowHint);
@@ -861,8 +880,13 @@ function fillTripProjectOptions(preferredTripId = "") {
   }
 }
 
+function entryLinksToTrip() {
+  if (activeType === "expense" && majorSelect.value === "出差") return true;
+  return activeType === "income" && minorSelect.value === "出差报销";
+}
+
 function syncTripProjectField(preferredTripId = "") {
-  const isTripRecord = majorSelect.value === "出差";
+  const isTripRecord = entryLinksToTrip();
   tripProjectField.hidden = !isTripRecord;
   tripProjectSelect.disabled = !isTripRecord;
   if (!isTripRecord) {
@@ -874,7 +898,7 @@ function syncTripProjectField(preferredTripId = "") {
 }
 
 function getEntryTripAssociation(existingRecord) {
-  const shouldLinkTrip = majorSelect.value === "出差";
+  const shouldLinkTrip = entryLinksToTrip();
   if (!shouldLinkTrip || !tripProjectSelect.value) {
     return {
       tripId: "",
@@ -1898,9 +1922,9 @@ async function archiveActiveTrip(event) {
   const totals = getTripTotals(trip);
   const surplus = roundMoney(reimbursementAmount - totals.expenseTotal);
   const settlementLabel = surplus > 0
-    ? `归入日常收入：工资 / 补贴 ${money(surplus)}`
+    ? `归入日常收入：报销 / 出差补贴 ${money(surplus)}`
     : surplus < 0
-      ? `归入日常支出：其他 / 出差未报销 ${money(Math.abs(surplus))}`
+      ? `归入日常支出：其他 / 未分类 ${money(Math.abs(surplus))}`
       : "差值为零，不生成日常收支记录";
   const linkedIncomeLabel = totals.incomeTotal
     ? `\n已关联出差收入：${money(totals.incomeTotal)}（仅供核对）`
@@ -1918,8 +1942,8 @@ async function archiveActiveTrip(event) {
       person: trip.traveler,
       amount: Math.abs(surplus),
       benefit: "",
-      major: surplus > 0 ? "工资" : "其他",
-      minor: surplus > 0 ? "补贴" : "出差未报销",
+      major: surplus > 0 ? "报销" : "其他",
+      minor: surplus > 0 ? "出差补贴" : "未分类",
       note: `${trip.tripNo} ${trip.subject} ${surplus > 0 ? "出差盈余" : "出差未报销"}`,
       date: reimbursedOn,
       createdAt: existingSettlement?.createdAt || now,
@@ -3068,6 +3092,9 @@ function fromCloudAsset(row) {
 function formatCloudSchemaError(error) {
   const message = String(error?.message || "云端操作失败");
   const lowerMessage = message.toLowerCase();
+  if (lowerMessage.includes("records_trip_category_check")) {
+    return "把「出差报销」归入出差项目前，需要先在 Supabase SQL Editor 里手动放宽 records 的出差分类约束。普通记账不受影响。";
+  }
   if (lowerMessage.includes("asset_id") || lowerMessage.includes("asset_flow") || lowerMessage.includes("records_asset_flow_check")) {
     return "云端还没有数字资产充值/扣款字段，请先在 Supabase SQL Editor 里手动运行这次迁移。";
   }
@@ -3374,18 +3401,37 @@ function migrateRecords(items) {
   return items.map((record) => normalizeRecordBenefit(normalizeRecord(record)));
 }
 
+function canonicalCategory(record) {
+  const type = record?.type;
+  const major = record?.major;
+  const minor = record?.minor;
+  const tripRole = record?.tripRole || "";
+  const alias = categoryAliases.find(
+    (item) => item.type === type && item.major === major && item.minor === minor && (item.tripRole ? tripRole === item.tripRole : true)
+  );
+  if (alias) return { major: alias.nextMajor, minor: alias.nextMinor };
+  if (type === "income" && major === "出差") return { major: "报销", minor: "出差报销" };
+  return { major, minor };
+}
+
 function normalizeRecord(record) {
   const assetLink = AssetLedger.normalizeAssetLink(record);
+  const category = canonicalCategory({ ...record, tripRole: record.tripRole || "" });
+  const originalCategory = record.tripOriginalMajor
+    ? canonicalCategory({ type: record.type, major: record.tripOriginalMajor, minor: record.tripOriginalMinor || "", tripRole: "" })
+    : { major: "", minor: "" };
   return {
     ...record,
+    major: category.major,
+    minor: category.minor,
     updatedAt: record.updatedAt || record.createdAt || "",
     deletedAt: record.deletedAt || "",
     createdBy: record.createdBy || "",
     tripId: record.tripId || "",
     tripRole: record.tripRole || "",
     tripLinkedAt: record.tripLinkedAt || "",
-    tripOriginalMajor: record.tripOriginalMajor || "",
-    tripOriginalMinor: record.tripOriginalMinor || "",
+    tripOriginalMajor: originalCategory.major,
+    tripOriginalMinor: originalCategory.minor,
     assetId: assetLink.assetId,
     assetFlow: assetLink.assetFlow
   };

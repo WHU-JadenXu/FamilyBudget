@@ -193,6 +193,11 @@ const assetTargetField = document.querySelector("#assetTargetField");
 const assetTargetLabel = document.querySelector("#assetTargetLabel");
 const assetTargetSelect = document.querySelector("#assetTarget");
 const assetFlowHint = document.querySelector("#assetFlowHint");
+const entryMore = document.querySelector("#entryMore");
+const newAssetFields = document.querySelector("#newAssetFields");
+const newAssetNameInput = document.querySelector("#newAssetName");
+const newAssetTypeSelect = document.querySelector("#newAssetType");
+const newAssetOptionValue = "__new__";
 const majorSelect = document.querySelector("#majorCategory");
 const minorSelect = document.querySelector("#minorCategory");
 const noteInput = document.querySelector("#note");
@@ -382,7 +387,7 @@ form.addEventListener("submit", async (event) => {
     return;
   }
 
-  const draft = buildEntryRecord(existingRecord, amount);
+  const draft = await buildEntryRecord(existingRecord, amount);
   if (!draft) return;
 
   if (editingRecordId) {
@@ -826,6 +831,7 @@ function getClearableRangeRecords(recordItems, startDate, endDate) {
 function resetForm() {
   form.reset();
   entryDateInput.value = getShanghaiDay();
+  if (entryMore) entryMore.open = false;
   fillMajorCategories();
   syncTripProjectField();
   syncAssetFlowField();
@@ -893,6 +899,7 @@ function syncTripProjectField(preferredTripId = "") {
     tripProjectSelect.value = "";
     return;
   }
+  if (entryMore) entryMore.open = true;
   const currentValue = preferredTripId || tripProjectSelect.value;
   fillTripProjectOptions(currentValue);
 }
@@ -946,7 +953,7 @@ function readEntryAmount() {
   return roundMoney(amount);
 }
 
-function buildEntryRecord(existingRecord, amount) {
+async function buildEntryRecord(existingRecord, amount) {
   const recordPerson = existingRecord?.person || getCurrentRecordPerson();
   if (!recordPerson) {
     alert("当前登录账号没有匹配到记账人，请检查 config.js 中的账号映射后再记账。");
@@ -954,7 +961,7 @@ function buildEntryRecord(existingRecord, amount) {
   }
   const tripAssociation = getEntryTripAssociation(existingRecord);
   if (!tripAssociation) return null;
-  const assetLink = getEntryAssetLink(existingRecord, amount);
+  const assetLink = await getEntryAssetLink(existingRecord, amount);
   if (!assetLink) return null;
   const now = new Date().toISOString();
   return normalizeRecord({
@@ -1004,6 +1011,7 @@ function syncAssetFlowField(preferredAssetId = "") {
   assetTargetField.hidden = !needsAsset;
   assetTargetLabel.textContent = flow === "topup" ? "充值到" : "从哪张卡扣款";
   if (needsAsset) fillAssetTargetOptions(preferredAssetId);
+  if (flow && entryMore) entryMore.open = true;
   updateAssetFlowHint();
 }
 
@@ -1011,31 +1019,48 @@ function fillAssetTargetOptions(preferredAssetId = "") {
   const visibleAssets = assets
     .filter((asset) => !asset.deletedAt)
     .sort((left, right) => left.name.localeCompare(right.name, "zh-CN"));
+  const creating = getSelectedAssetFlow() === "topup";
   const current = preferredAssetId || assetTargetSelect.value;
-  assetTargetSelect.innerHTML = visibleAssets.length
-    ? visibleAssets
-        .map((asset) => {
-          const balance = AssetLedger.getAssetBalance(asset, records, { excludeRecordId: editingRecordId });
-          const balanceText = editingRecordId ? `不含本笔 ${money(balance)}` : `余额 ${money(balance)}`;
-          return `<option value="${escapeHtml(asset.id)}">${escapeHtml(asset.name)} · ${escapeHtml(balanceText)}</option>`;
-        })
-        .join("")
-    : `<option value="">还没有数字资产</option>`;
-  if (current && visibleAssets.some((asset) => asset.id === current)) assetTargetSelect.value = current;
+  const options = visibleAssets.map((asset) => {
+    const balance = AssetLedger.getAssetBalance(asset, records, { excludeRecordId: editingRecordId });
+    const balanceText = editingRecordId ? `不含本笔 ${money(balance)}` : `余额 ${money(balance)}`;
+    return `<option value="${escapeHtml(asset.id)}">${escapeHtml(asset.name)} · ${escapeHtml(balanceText)}</option>`;
+  });
+  if (creating) options.push(`<option value="${newAssetOptionValue}">+ 新建</option>`);
+  assetTargetSelect.innerHTML = options.join("") || `<option value="">还没有数字资产</option>`;
+  if (creating && current === newAssetOptionValue) assetTargetSelect.value = newAssetOptionValue;
+  else if (current && visibleAssets.some((asset) => asset.id === current)) assetTargetSelect.value = current;
+  syncNewAssetFields();
+}
+
+function syncNewAssetFields() {
+  const show = getSelectedAssetFlow() === "topup" && assetTargetSelect.value === newAssetOptionValue;
+  newAssetFields.hidden = !show;
 }
 
 function updateAssetFlowHint() {
   const flow = assetFlowAllowed() ? getSelectedAssetFlow() : "";
+  syncNewAssetFields();
   if (!flow || assetTargetField.hidden) {
     assetFlowHint.textContent = "";
     assetFlowHint.classList.remove("warning");
     amountInput.removeAttribute("aria-invalid");
     return;
   }
+  if (assetTargetSelect.value === newAssetOptionValue) {
+    assetFlowHint.textContent = "保存时新建这张卡，登记余额为 0，再把这笔充值加进去。";
+    assetFlowHint.classList.remove("warning");
+    amountInput.removeAttribute("aria-invalid");
+    syncNewAssetFields();
+    return;
+  }
   const asset = getVisibleAsset(assetTargetSelect.value);
   if (!asset) {
-    assetFlowHint.textContent = "还没有数字资产。请先到「储值」页新增；已有的钱填登记余额，今天现金充值的填 0。";
+    assetFlowHint.textContent = flow === "topup"
+      ? "选「+ 新建」，保存时会建一张余额为 0 的卡并充值。"
+      : "还没有数字资产。可以先充值时新建，或到「储值」页登记已有余额。";
     assetFlowHint.classList.add("warning");
+    syncNewAssetFields();
     return;
   }
   const rawAmount = Number.parseFloat(String(amountInput.value || "").replace(",", "."));
@@ -1067,18 +1092,61 @@ function updateAssetFlowHint() {
     : `不计入本月现金支出。「${asset.name}」${balanceLabel} ${money(available)}${amount ? `，扣款后 ${money(projected)}` : ""}。分类选真实消费，例如餐饮。`;
 }
 
-function getEntryAssetLink(existingRecord, amount) {
+async function getEntryAssetLink(existingRecord, amount) {
   const flow = assetFlowAllowed() ? getSelectedAssetFlow() : "";
-  const assetId = flow ? assetTargetSelect.value : "";
-  if (flow && !getVisibleAsset(assetId)) {
-    alert(assets.some((asset) => !asset.deletedAt)
-      ? "请选择一个数字资产。"
-      : "还没有数字资产。请先到「储值」页新增，已有余额直接登记，今天的现金充值填 0 后再回来记。");
+  let assetId = flow ? assetTargetSelect.value : "";
+  const creating = flow === "topup" && assetId === newAssetOptionValue;
+  if (creating) {
+    const name = newAssetNameInput.value.trim();
+    if (!name) {
+      alert("请填写新资产的名称。");
+      if (entryMore) entryMore.open = true;
+      newAssetNameInput.focus();
+      return null;
+    }
+    if (existingRecord?.assetId && !assetChangeKeepsBalances(existingRecord, { assetId: "", assetFlow: "" }, amount)) return null;
+    const created = await createOpeningAsset({
+      name,
+      assetType: newAssetTypeSelect.value || "stored_value"
+    });
+    if (!created) return null;
+    assetId = created.id;
+  } else if (flow && !getVisibleAsset(assetId)) {
+    alert(flow === "topup"
+      ? "请选择一张卡，或选「+ 新建」。"
+      : assets.some((asset) => !asset.deletedAt)
+        ? "请选择一个数字资产。"
+        : "还没有数字资产。请先用「充值到数字资产」新建，或到「储值」页登记已有余额。");
     return null;
   }
   const nextLink = { assetId, assetFlow: flow };
-  if (!assetChangeKeepsBalances(existingRecord, nextLink, amount)) return null;
+  if (!creating && !assetChangeKeepsBalances(existingRecord, nextLink, amount)) return null;
   return nextLink;
+}
+
+async function createOpeningAsset({ name, assetType }) {
+  const now = new Date().toISOString();
+  const owner = getCurrentRecordPerson() || getDefaultPerson();
+  let asset = normalizeAsset({
+    id: createUuid(),
+    name,
+    assetType: ["membership", "stored_value", "digital"].includes(assetType) ? assetType : "stored_value",
+    owner: [...people, "共同"].includes(owner) ? owner : "共同",
+    balance: 0,
+    balanceUpdatedOn: entryDateInput.value || getShanghaiDay(),
+    note: "",
+    createdAt: now,
+    updatedAt: now,
+    createdBy: currentUser?.id || ""
+  });
+  if (isCloudReady) {
+    const savedAsset = await saveCloudAsset(asset, { isNew: true, quiet: true });
+    if (!savedAsset) return null;
+    asset = savedAsset;
+  }
+  assets = [asset, ...assets.filter((item) => item.id !== asset.id)];
+  saveAssets();
+  return asset;
 }
 
 function assetChangeKeepsBalances(existingRecord, nextLink, amount) {
@@ -1161,6 +1229,7 @@ function describeAssetSource(record) {
 function setAssetFlowControls(record) {
   assetFlowSelect.value = record?.assetFlow === "topup" || record?.assetFlow === "spend" ? record.assetFlow : "";
   syncAssetFlowField(record?.assetId || "");
+  if (entryMore && (record?.assetId || record?.tripId)) entryMore.open = true;
 }
 
 function fillDetailCategories() {
@@ -1219,7 +1288,6 @@ function render() {
   const monthRecords = dailyRecords.filter((record) => getRecordDay(record).slice(0, 7) === monthKey);
   const visibleRecords = getVisibleDetailRecords();
 
-  document.querySelector("#monthLabel").textContent = `今天 ${formatDay(today)}`;
   document.querySelector("#monthExpense").textContent = money(sum(monthRecords, "expense"));
   document.querySelector("#monthIncome").textContent = money(sum(monthRecords, "income"));
   document.querySelector("#liTotal").textContent = money(sum(monthRecords.filter((record) => record.person === "李逍宇"), "expense"));

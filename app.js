@@ -3069,7 +3069,7 @@ function formatCloudSchemaError(error) {
   const message = String(error?.message || "云端操作失败");
   const lowerMessage = message.toLowerCase();
   if (lowerMessage.includes("asset_id") || lowerMessage.includes("asset_flow") || lowerMessage.includes("records_asset_flow_check")) {
-    return "云端还没有数字资产充值/扣款字段，请先在 Supabase SQL Editor 运行 supabase-asset-flow.sql";
+    return "云端还没有数字资产充值/扣款字段，请先在 Supabase SQL Editor 里手动运行这次迁移。";
   }
   if (lowerMessage.includes("stored_assets") || lowerMessage.includes("asset_type") || lowerMessage.includes("balance_updated_on")) {
     return "云端还没有储值资产模块的数据表，请先在 Supabase SQL Editor 重新运行新版 supabase-schema.sql";

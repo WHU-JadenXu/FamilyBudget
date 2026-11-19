@@ -129,6 +129,13 @@ h2 {
   font-size: 14px;
 }
 
+.summary-note {
+  margin: 10px 0 0;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .cloud-panel,
 .entry-panel,
 .toolbar,
@@ -304,6 +311,26 @@ select:focus {
 
 .full {
   grid-column: 1 / -1;
+}
+
+.asset-flow-hint,
+.field-hint {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+  white-space: normal;
+}
+
+.asset-flow-hint.warning,
+.field-hint.warning {
+  color: var(--danger);
+}
+
+.field-hint {
+  margin-top: 0;
 }
 
 .form-actions {
@@ -648,12 +675,33 @@ select:focus {
 }
 
 .record-money {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
   font-weight: 800;
   white-space: nowrap;
 }
 
+.record-money small {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
 .record-money.income {
   color: var(--blue);
+}
+
+.record-money.asset-spend {
+  color: #8a5a12;
+}
+
+.record-item.asset-linked .record-meta {
+  display: -webkit-box;
+  overflow: hidden;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .record-actions {
@@ -734,6 +782,19 @@ select:focus {
   font-size: 20px;
 }
 
+.asset-balance-note,
+.asset-balance-formula,
+.asset-history-empty {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.asset-balance-formula {
+  margin: 0;
+}
+
 .asset-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -791,18 +852,92 @@ select:focus {
 }
 
 .asset-card-balance {
+  display: grid;
+  justify-items: end;
   color: var(--green-dark);
   font-weight: 900;
+  text-align: right;
   white-space: nowrap;
+}
+
+.asset-card-balance small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.asset-card-balance.negative {
+  color: var(--danger);
+}
+
+.asset-balance-formula,
+.asset-history {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.asset-history {
+  display: grid;
+  gap: 0;
+}
+
+.asset-history-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.asset-history-row div {
+  min-width: 0;
+}
+
+.asset-history-row strong,
+.asset-history-row span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-history-row span {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.asset-history-row b.spend {
+  color: #8a5a12;
+}
+
+.asset-history-row b.topup {
+  color: var(--green-dark);
+}
+
+.asset-history-row button {
+  min-width: 52px;
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--green-dark);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.asset-history-row .asset-history-spacer {
+  min-width: 52px;
 }
 
 .asset-card-actions {
   display: grid;
-  grid-column: 2 / -1;
-  grid-template-columns: 1fr 1fr;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
-  width: min(180px, 100%);
-  justify-self: end;
+  width: 100%;
 }
 
 .asset-card-actions button {

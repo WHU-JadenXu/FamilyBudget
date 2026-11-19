@@ -10,7 +10,7 @@
     <title>家庭记账</title>
     <link rel="apple-touch-icon" href="./assets/miniapp-avatar-xl.png" />
     <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="stylesheet" href="./styles.css?v=20260912-entry-two-columns" />
+    <link rel="stylesheet" href="./styles.css?v=20261119-asset-flow" />
   </head>
   <body>
     <main class="app-shell">
@@ -40,6 +40,7 @@
             <strong id="monthIncome">¥0.00</strong>
           </div>
         </div>
+        <p id="monthCashNote" class="summary-note" hidden></p>
       </section>
 
       <section id="pageEntry" class="app-page active" data-page="entry">
@@ -74,6 +75,21 @@
             <label>
               <span>日期</span>
               <input id="entryDate" name="entryDate" type="date" required />
+            </label>
+
+            <label id="assetFlowField" class="full">
+              <span>资金来源</span>
+              <select id="assetFlow" name="assetFlow">
+                <option value="">现金或其他（计入本月支出）</option>
+                <option value="topup">充值到数字资产（计入支出，并增加余额）</option>
+                <option value="spend">从数字资产扣款（不计入现金支出）</option>
+              </select>
+            </label>
+
+            <label id="assetTargetField" class="full" hidden>
+              <span id="assetTargetLabel">数字资产</span>
+              <select id="assetTarget" name="assetTarget"></select>
+              <small id="assetFlowHint" class="asset-flow-hint"></small>
             </label>
 
             <label>
@@ -334,6 +350,7 @@
             <div><span>资产数量</span><strong id="assetCount">0</strong></div>
             <div><span>当前余额合计</span><strong id="assetBalanceTotal">¥0.00</strong></div>
           </div>
+          <p class="asset-balance-note">当前余额 = 登记余额 + 充值 − 扣款。登记时填写的余额不会再记一笔现金支出。</p>
         </section>
 
         <section id="assetFormPanel" class="asset-form-panel" hidden>
@@ -362,7 +379,7 @@
               </select>
             </label>
             <label>
-              <span>当前余额</span>
+              <span id="assetBalanceLabel">当前余额</span>
               <input id="assetBalance" inputmode="decimal" placeholder="0.00" required />
             </label>
             <label>
@@ -373,6 +390,7 @@
               <span>备注</span>
               <input id="assetNote" autocomplete="off" placeholder="例如：卡号尾号、有效期或使用说明" />
             </label>
+            <p id="assetBalanceHint" class="field-hint full">卡里已经有、且不需要再记现金支出的钱填在这里。今天用现金充值的，填 0，再到记账页选「充值到数字资产」。</p>
             <div class="form-actions full">
               <button id="saveAssetBtn" class="primary-action" type="submit">保存资产</button>
               <button id="cancelAssetEditBtn" class="secondary-action" type="button">取消</button>
@@ -458,6 +476,7 @@
 
     <script src="./config.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="./app.js?v=20260912-entry-two-columns"></script>
+    <script src="./asset-ledger.js?v=20261119-asset-flow"></script>
+    <script src="./app.js?v=20261119-asset-flow"></script>
   </body>
 </html>

@@ -41,7 +41,7 @@ select {
   width: min(100%, 480px);
   min-height: 100vh;
   margin: 0 auto;
-  padding: max(16px, env(safe-area-inset-top)) 14px calc(86px + env(safe-area-inset-bottom));
+  padding: max(10px, env(safe-area-inset-top)) 12px calc(78px + env(safe-area-inset-bottom));
 }
 
 .top-band {
@@ -87,7 +87,7 @@ h2 {
 }
 
 .summary-band {
-  padding: 14px;
+  padding: 10px 12px;
   border-radius: 8px;
   background: linear-gradient(135deg, var(--green-dark), var(--green));
   color: #fff;
@@ -103,21 +103,21 @@ h2 {
 
 .summary-main strong {
   display: block;
-  margin-top: 4px;
-  font-size: 28px;
+  margin-top: 2px;
+  font-size: 24px;
   line-height: 1.08;
 }
 
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 12px;
+  gap: 6px;
+  margin-top: 8px;
 }
 
 .summary-grid div {
-  min-height: 52px;
-  padding: 8px;
+  min-height: 0;
+  padding: 6px;
   border-radius: 7px;
   background: rgba(255, 255, 255, 0.12);
 }
@@ -140,7 +140,7 @@ h2 {
 .entry-panel,
 .toolbar,
 .records-section {
-  margin-top: 16px;
+  margin-top: 10px;
 }
 
 .app-page {
@@ -225,7 +225,7 @@ h2 {
 }
 
 .entry-panel {
-  padding: 14px;
+  padding: 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.94);
@@ -234,7 +234,7 @@ h2 {
 .segmented {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  height: 42px;
+  height: 36px;
   padding: 3px;
   border-radius: 8px;
   background: #e7efec;
@@ -257,8 +257,8 @@ h2 {
 .entry-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 14px;
+  gap: 6px;
+  margin-top: 8px;
 }
 
 .entry-form > label {
@@ -272,9 +272,43 @@ h2 {
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  height: 44px;
-  min-height: 44px;
+  height: 40px;
+  min-height: 40px;
   font-size: 16px;
+}
+
+.entry-form label span {
+  margin-bottom: 2px;
+}
+
+.entry-more {
+  grid-column: 1 / -1;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+  padding: 0 8px;
+}
+
+.entry-more summary {
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+  color: var(--green-dark);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.entry-more-body {
+  display: grid;
+  gap: 6px;
+  padding-bottom: 8px;
+}
+
+.new-asset-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.8fr);
+  gap: 6px;
 }
 
 label span {
@@ -336,11 +370,11 @@ select:focus {
 .form-actions {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 10px;
+  gap: 8px;
 }
 
 .primary-action {
-  min-height: 50px;
+  min-height: 44px;
   border: 0;
   border-radius: 8px;
   background: var(--amber);

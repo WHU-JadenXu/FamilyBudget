@@ -10,17 +10,10 @@
     <title>家庭记账</title>
     <link rel="apple-touch-icon" href="./assets/miniapp-avatar-xl.png" />
     <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="stylesheet" href="./styles.css?v=20261119-asset-flow" />
+    <link rel="stylesheet" href="./styles.css?v=20261119-compact-entry" />
   </head>
   <body>
     <main class="app-shell">
-      <section class="top-band">
-        <div>
-          <p class="eyebrow">👦 李逍宇 & 👧 徐佳丹</p>
-        </div>
-        <div class="month-chip" id="monthLabel"></div>
-      </section>
-
       <section id="monthlySummary" class="summary-band" aria-label="本月概览">
         <div class="summary-main">
           <span>本月支出</span>
@@ -77,21 +70,6 @@
               <input id="entryDate" name="entryDate" type="date" required />
             </label>
 
-            <label id="assetFlowField" class="full">
-              <span>资金来源</span>
-              <select id="assetFlow" name="assetFlow">
-                <option value="">现金或其他（计入本月支出）</option>
-                <option value="topup">充值到数字资产（计入支出，并增加余额）</option>
-                <option value="spend">从数字资产扣款（不计入现金支出）</option>
-              </select>
-            </label>
-
-            <label id="assetTargetField" class="full" hidden>
-              <span id="assetTargetLabel">数字资产</span>
-              <select id="assetTarget" name="assetTarget"></select>
-              <small id="assetFlowHint" class="asset-flow-hint"></small>
-            </label>
-
             <label>
               <span>大类</span>
               <select id="majorCategory" name="majorCategory"></select>
@@ -102,15 +80,50 @@
               <select id="minorCategory" name="minorCategory"></select>
             </label>
 
-            <label id="tripProjectField" class="full" hidden>
-              <span>出差项目（可以稍后归入）</span>
-              <select id="tripProjectSelect" name="tripProjectSelect"></select>
-            </label>
-
             <label class="full">
               <span>备注</span>
               <input id="note" name="note" autocomplete="off" placeholder="可不填" />
             </label>
+
+            <details id="entryMore" class="entry-more">
+              <summary>更多</summary>
+              <div class="entry-more-body">
+                <label id="assetFlowField">
+                  <span>资金来源</span>
+                  <select id="assetFlow" name="assetFlow">
+                    <option value="">现金或其他（计入本月支出）</option>
+                    <option value="topup">充值到数字资产（计入支出，并增加余额）</option>
+                    <option value="spend">从数字资产扣款（不计入现金支出）</option>
+                  </select>
+                </label>
+
+                <label id="assetTargetField" hidden>
+                  <span id="assetTargetLabel">数字资产</span>
+                  <select id="assetTarget" name="assetTarget"></select>
+                  <small id="assetFlowHint" class="asset-flow-hint"></small>
+                </label>
+
+                <div id="newAssetFields" class="new-asset-fields" hidden>
+                  <label>
+                    <span>新资产名称</span>
+                    <input id="newAssetName" name="newAssetName" autocomplete="off" placeholder="例如：面包店会员卡" />
+                  </label>
+                  <label>
+                    <span>类型</span>
+                    <select id="newAssetType" name="newAssetType">
+                      <option value="membership">会员卡</option>
+                      <option value="stored_value" selected>储值卡</option>
+                      <option value="digital">数字资产</option>
+                    </select>
+                  </label>
+                </div>
+
+                <label id="tripProjectField" hidden>
+                  <span>出差项目（可以稍后归入）</span>
+                  <select id="tripProjectSelect" name="tripProjectSelect"></select>
+                </label>
+              </div>
+            </details>
 
             <div class="form-actions full">
               <button id="submitEntryBtn" class="primary-action" type="submit">记一笔</button>
@@ -477,6 +490,6 @@
     <script src="./config.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="./asset-ledger.js?v=20261119-asset-flow"></script>
-    <script src="./app.js?v=20261119-categories"></script>
+    <script src="./app.js?v=20261119-compact-entry"></script>
   </body>
 </html>
